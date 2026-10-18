@@ -1,0 +1,1056 @@
+import calendar as calendar_module
+import datetime
+import json
+import math
+import os
+import time
+import urllib.request
+import board
+import adafruit_dht
+import paho.mqtt.client as mqtt
+import yaml
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
+
+BROKER = "localhost"
+PORT = 1883
+TOPIC_TEMP = "home/dht11/temperature"
+TOPIC_HUM = "home/dht11/humidity"
+TOPIC_JSON = "home/dht11/state"
+TOPIC_OUT = "home/outside/temperature"
+TOPIC_OUTDOOR = "home/outdoor/temperature"   # published by the outdoor Pico W
+TOPIC_OUTDOOR_HUM = "home/outdoor/humidity"  # published by the outdoor Pico W
+TOPIC_INDOOR_PM25 = "home/indoor_pm25"       # published by pms5003_mqtt.py
+TOPIC_INDOOR_PM10 = "home/indoor_pm10"       # published by pms5003_mqtt.py
+TOPIC_TM_STATUS = "home/mac/timemachine_status"    # "ok"/"running"/"stale"/"error",
+                                                    # published by mac_timemachine_status.py
+TOPIC_TM_AGE_H = "home/mac/timemachine_age_hours"  # hours since the last successful backup
+TOPIC_TM_PERCENT = "home/mac/timemachine_percent"  # 0-100, only while status == "running"
+TOPIC_TM_GB_DONE = "home/mac/timemachine_gb_done"    # GB copied so far, only while running
+TOPIC_TM_GB_TOTAL = "home/mac/timemachine_gb_total"  # GB this backup expects to copy, only while running
+OUTDOOR_MAX_AGE = 30 * 60   # seconds; older than this -> fall back to OpenWeather
+TM_REPORT_MAX_AGE = 3 * 60 * 60   # seconds; older than this -> treat as "no data from
+                                   # the Mac" (asleep, off, or the launchd job stopped),
+                                   # same idea as OUTDOOR_MAX_AGE above
+INTERVAL = 10            # seconds between DHT reads
+WEATHER_INTERVAL = 600   # seconds between weather fetches (10 min)
+
+EXTRA_FILE = os.path.expanduser("~/clock_extra.txt")
+COUNTDOWN_FILE = os.path.expanduser("~/display_countdown.txt")  # written by motion_display.py
+
+OWM_KEY = "__OWM_KEY__"
+LAT, LON = __LAT__, __LON__
+WEATHER_URL = (
+    "https://api.openweathermap.org/data/2.5/weather"
+    f"?lat={LAT}&lon={LON}&units=metric&appid={OWM_KEY}"
+)
+
+def write_extra(text):
+    tmp = EXTRA_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, EXTRA_FILE)
+
+
+# ---------------------------------------------------------------------
+# Dot-grid + weather-line overlay image, plus the upper-left calendar
+# widget (today's date and a small month grid, settings under Config
+# section "calendar" / web Settings page "Calendar"). Both live on the
+# same PNG, at opposite corners, so they share one viewer.overlay_image
+# slot instead of needing a second one from PicFrame3 itself.
+#
+# PicFrame3's native clock_extra_file mechanism draws text with its own
+# bundled font, which turned out to have very sparse glyph coverage (only
+# a handful of symbols render; most Unicode dot/circle glyphs show as
+# tofu boxes). So instead of feeding text through that path, this writes
+# clock_extra_file as an empty string (silencing PicFrame3's own second
+# line) and draws the ENTIRE weather line -- text and the idle-countdown
+# dot grid together -- as one PNG, via PicFrame3's separate
+# viewer.overlay_image mechanism (app.py: _tick_user_overlay(), which
+# just watches a PNG's mtime and alpha-composites it full-screen).
+#
+# The positioning math below is a deliberate replica of PicFrame3's own
+# gfx/overlays.py:clock() and gfx/textstyle.py:render_text(), using the
+# SAME font, size formula, wrap algorithm and padding/shadow geometry, so
+# our line lands pixel-for-pixel where the native text would have been.
+# If PicFrame3 changes that layout code in a future update, this will
+# need to be re-synced by hand -- it is not calling into their code.
+#
+# One useful derived identity (not obvious from their source, worth
+# keeping documented here): the caption/extra line's BOTTOM edge in their
+# native layout always equals screen_height - bottom_margin, regardless
+# of the time line's own height or the negative "gap" the two lines are
+# merged with -- those terms cancel exactly in the compositing math. So
+# we don't need the time line's own metrics at all to place our line.
+# ---------------------------------------------------------------------
+
+_cfg_path = os.path.expanduser("~/.config/picframe3/config.yaml")
+try:
+    with open(_cfg_path, encoding="utf-8") as f:
+        _cfg = yaml.safe_load(f) or {}
+except OSError:
+    _cfg = {}
+_viewer_cfg = (_cfg.get("viewer") or {})
+
+FONT_PATH = _viewer_cfg.get("font") or "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+CLOCK_SIZE = int(_viewer_cfg.get("clock_size", 48))
+CLOCK_OFFSET_PCT = tuple(_viewer_cfg.get("clock_offset_pct", [3.0, 3.0]))
+CLOCK_OPACITY = float(_viewer_cfg.get("clock_opacity", 1.0))
+OVERLAY_IMAGE = _viewer_cfg.get("overlay_image") or "/dev/shm/picframe-overlay.png"
+
+# Screen resolution -- PicFrame3 resizes the overlay PNG to fill the real
+# screen regardless of the canvas size we draw at, but drawing at the
+# WRONG aspect ratio would stretch our circles into ellipses. Confirmed
+# via `fbset -s` on this Pi; update here if the display ever changes.
+SCREEN_W, SCREEN_H = __SCREEN_W__, __SCREEN_H__
+
+EXTRA_SCALE = 0.34          # overlays.py: clock(..., extra_scale=0.34)
+LINE_SPACING = 1.25         # textstyle.TextStyle.line_spacing default
+SHADOW_RADIUS = 3.0         # textstyle.TextStyle.shadow_radius default
+SHADOW_OPACITY = 0.75       # textstyle.TextStyle.shadow_opacity default
+PAD = int(SHADOW_RADIUS * 3)   # textstyle.render_text(): pad if shadow else 2
+MAX_WIDTH_FRAC = 0.45       # overlays.py: max_width=int(w * 0.45)
+
+#: Used only if config.yaml has no "overlay" section yet.
+DEFAULT_OVERLAY_SETTINGS = {
+    "dot_count": 16,          # 4x4 grid
+    "gap_to_text": 14,        # px between the dot grid and the start of the text
+    "filled_alpha": 235,
+    "unfilled_alpha": 60,
+    "background_color": [0, 0, 0],
+    "background_opacity": 0.0,   # 0 = old drop-shadowed look, no panel
+    "background_padding": 20,
+}
+
+
+def load_overlay_settings():
+    """overlay.* from config.yaml, read fresh every call so a change made
+    on the web Settings page (section "Weather overlay") reaches this
+    already-running process without a restart."""
+    settings = dict(DEFAULT_OVERLAY_SETTINGS)
+    try:
+        with open(_cfg_path, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    except OSError:
+        return settings
+    settings.update(cfg.get("overlay") or {})
+    return settings
+
+
+#: Used only if config.yaml has no "calendar" section yet.
+DEFAULT_CALENDAR_SETTINGS = {
+    "enabled": True,
+    "offset_pct": [3.0, 3.0],
+    "size": 34,
+    "grid_size": 20,
+    "grid_row_gap": 0,
+    "text_color": [255, 255, 255],
+    "text_opacity": 0.9,
+    "background_color": [0, 0, 0],
+    "background_opacity": 0.35,
+    "holiday_color": "dull_red",
+}
+
+
+def load_calendar_settings():
+    """calendar.* from config.yaml, read fresh every call so a change made
+    on the web Settings page (section "Calendar") reaches this already-
+    running process without a restart."""
+    settings = dict(DEFAULT_CALENDAR_SETTINGS)
+    try:
+        with open(_cfg_path, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    except OSError:
+        return settings
+    settings.update(cfg.get("calendar") or {})
+    return settings
+
+
+# Monday=0 .. Sunday=6, matching Python's calendar module. The grid always
+# starts the week on Monday -- there is no setting for this yet.
+_WEEKDAY_HEADERS = ["M", "T", "W", "T", "F", "S", "S"]
+
+#: Gazetted ("Closed") holidays, copied by hand from the Army Postal Service
+#: Corps 2026 calendar (Delhi). Keyed by (month, day) -> festival name. This
+#: is the static stand-in for calendar.py's long-deferred "sync to some
+#: online calendar to get Indian holidays" -- there's no live source yet,
+#: so a new year's dates need adding here by hand until there is one.
+HOLIDAYS_BY_YEAR = {
+    2026: {
+        (1, 26): "Republic Day",
+        (3, 4): "Holi",
+        (3, 21): "Id-ul-Fitr",
+        (3, 26): "Ram Navami",
+        (3, 31): "Mahavir Jayanti",
+        (4, 3): "Good Friday",
+        (5, 1): "Buddha Purnima",
+        (5, 27): "Id-ul-Zuha (Bakrid)",
+        (6, 26): "Muharram",
+        (8, 15): "Independence Day",
+        (8, 26): "Milad-un-Nabi",
+        (9, 4): "Janmashtami",
+        (10, 2): "Gandhi Jayanti",
+        (10, 20): "Dussehra",
+        (11, 8): "Diwali",
+        (11, 24): "Guru Nanak's Birthday",
+        (12, 25): "Christmas Day",
+    },
+}
+
+#: The palette calendar.holiday_color picks from (web Settings page,
+#: section "Calendar", "Holiday colour") -- a dropdown of named swatches
+#: rather than a 3-number RGB field, so it reads as "pick a colour" rather
+#: than "mix one". Keep this in lock-step with CHOICES["calendar.holiday_color"]
+#: in src/picframe3/uischema.py -- that's what the Settings page offers, and
+#: a name picked there that isn't a key here falls back to "dull_red" below.
+HOLIDAY_PALETTE = {
+    "dull_red": (168, 76, 70),
+    "crimson": (196, 46, 58),
+    "orange": (214, 115, 40),
+    "amber": (209, 155, 40),
+    "olive": (121, 128, 56),
+    "forest_green": (63, 125, 88),
+    "teal": (52, 128, 128),
+    "sky_blue": (70, 130, 190),
+    "indigo": (90, 86, 180),
+    "violet": (140, 86, 180),
+    "magenta": (186, 76, 150),
+    "slate_grey": (120, 128, 138),
+    "white": (255, 255, 255),
+}
+
+
+#: Breathing room (px) between the text/grid content and the translucent
+#: panel's own edge, scaled with the widget's own size setting below.
+_PANEL_PAD_FRAC = 0.45
+
+#: How much lighter/darker than the background highlight circle has to read,
+#: on a 0-255 luminance scale, to pick black vs. white for the "today"
+#: number -- lets the circle itself always be drawn in text_color while the
+#: number on top of it stays legible against either a light or a dark pick.
+def _contrast_text(rgb):
+    r, g, b = rgb
+    luminance = 0.299 * r + 0.587 * g + 0.114 * b
+    return (0, 0, 0, 255) if luminance > 150 else (255, 255, 255, 255)
+
+
+def _calendar_widget_image(today, font_path, size, grid_size, grid_row_gap,
+                           text_color, text_opacity, holiday_color):
+    """Today's date/day-name, and a small month grid below it with today
+    highlighted. One RGBA image, sized to its own content -- the caller
+    places it, so this knows nothing about screen position or the
+    translucent background panel (that's write_calendar's job, below).
+
+    size and grid_size are independent: size is the "today" line's own
+    point size, grid_size the day-numbers'/weekday-header's. grid_row_gap
+    adds extra vertical space between every row of the grid -- between the
+    weekday-header row and the first week, and between each week after
+    that. text_color is an (r, g, b) tuple and text_opacity 0-1; both apply
+    to the date line, the weekday headers and the day numbers alike.
+    holiday_color is an (r, g, b) tuple too, already resolved from the
+    calendar.holiday_color palette name by the caller. The "today"
+    highlight circle is always drawn solid in text_color (at full
+    strength, so it stands out as a highlight rather than fading with the
+    rest), with its own day-number switched to black or white for contrast
+    against it."""
+    try:
+        date_font = ImageFont.truetype(font_path, size)
+        grid_font = ImageFont.truetype(font_path, grid_size)
+    except OSError:
+        fallback = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+        date_font = ImageFont.truetype(fallback, size)
+        grid_font = ImageFont.truetype(fallback, grid_size)
+
+    text_alpha = max(0, min(255, round(255 * text_opacity)))
+    text_rgba = (*text_color, text_alpha)
+    header_rgba = (*text_color, round(text_alpha * 0.75))   # weekday row, a touch dimmer
+    holiday_rgba = (*holiday_color, text_alpha)
+    holiday_header_rgba = (*holiday_color, round(text_alpha * 0.75))
+    today_number_rgba = _contrast_text(text_color)
+
+    holidays = HOLIDAYS_BY_YEAR.get(today.year, {})
+    this_month_holidays = sorted(
+        (day, name) for (month, day), name in holidays.items() if month == today.month)
+
+    probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    date_line = today.strftime("%A, %-d %B")
+    date_w = int(probe.textlength(date_line, font=date_font))
+    date_ascent, date_descent = date_font.getmetrics()
+    date_h = date_ascent + date_descent
+
+    # One grid row's natural height: the font's own line height, with no
+    # added padding -- grid_row_gap alone controls any extra breathing
+    # room, so a setting of 0 really does pack the rows as tight as the
+    # font allows, rather than leaving a fixed cushion around each row
+    # regardless of what grid_row_gap says.
+    cell_h = max(14, sum(grid_font.getmetrics()))
+    grid_gap_y = round(size * 0.3)          # gap between the date line and the grid
+
+    cal = calendar_module.Calendar(firstweekday=0)   # Monday first
+    weeks = cal.monthdayscalendar(today.year, today.month)
+
+    grid_w_natural = cell_h * 7
+    # One "row pitch" (top of one row to the top of the next) covers the
+    # weekday-header row and every week row alike -- grid_row_gap is the
+    # extra space folded into each step, on top of the row's own cell_h.
+    row_pitch = cell_h + grid_row_gap
+    num_rows = len(weeks) + 1   # the header row, plus one per week
+    grid_h = cell_h * num_rows + grid_row_gap * (num_rows - 1)
+
+    # One entry per holiday this month, "D: Festival Name" -- reuses
+    # grid_font, so it tracks the same size setting as the day numbers.
+    # Two adjacent entries share one line, separated by " | ", whenever
+    # they both fit within the panel's base width (the date line / grid's
+    # own width, before any holiday text is considered) -- otherwise the
+    # second one starts a fresh line of its own.
+    holiday_entries = [f"{day}: {name}" for day, name in this_month_holidays]
+    base_width = max(date_w, grid_w_natural)
+    holiday_lines = []
+    i = 0
+    while i < len(holiday_entries):
+        first = holiday_entries[i]
+        if i + 1 < len(holiday_entries):
+            combined = f"{first}   |   {holiday_entries[i + 1]}"
+            if int(probe.textlength(combined, font=grid_font)) <= base_width:
+                holiday_lines.append(combined)
+                i += 2
+                continue
+        holiday_lines.append(first)
+        i += 1
+    holiday_line_h = sum(grid_font.getmetrics())
+    holiday_gap_y = round(grid_size * 0.4) if holiday_lines else 0
+    holiday_block_h = holiday_gap_y + holiday_line_h * len(holiday_lines)
+    holiday_widths = [int(probe.textlength(line, font=grid_font)) for line in holiday_lines]
+
+    width = max(date_w, grid_w_natural, *holiday_widths) if holiday_widths \
+        else max(date_w, grid_w_natural)
+    height = date_h + grid_gap_y + grid_h + holiday_block_h
+
+    # The grid's columns stretch to fill the panel's full width (whichever
+    # of the date line / natural 7-column grid is wider), rather than
+    # staying at their natural size and floating centred with empty space
+    # down the sides -- cell_w can come out wider than cell_h when the date
+    # line is the wider of the two, which is the common case. The day-
+    # number font itself stays at grid_size regardless (set above), so
+    # widening the columns doesn't change how big the numbers read.
+    cell_w = width / 7.0
+
+    img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    # If the date line itself is the narrower one (a short month name, a
+    # small locale format), centre it over the full-width grid below it.
+    date_x = (width - date_w) // 2
+
+    draw.text((date_x, 0), date_line, font=date_font, fill=text_rgba)
+
+    grid_top = date_h + grid_gap_y
+    for col, label in enumerate(_WEEKDAY_HEADERS):
+        cx = col * cell_w + cell_w / 2
+        lw = probe.textlength(label, font=grid_font)
+        is_sunday = col == 6
+        draw.text((cx - lw / 2, grid_top), label, font=grid_font,
+                  fill=holiday_header_rgba if is_sunday else header_rgba)
+
+    # The "today" highlight stays a circle (not stretched into an oval even
+    # when columns are wider than tall), sized to the smaller of the two
+    # and centred within its own column/row.
+    highlight_d = min(cell_w, cell_h) - 4
+
+    for row, week in enumerate(weeks):
+        for col, day in enumerate(week):
+            if day == 0:
+                continue   # padding day from the previous/next month
+            cy = grid_top + row_pitch * (row + 1)   # row 0 of the grid is the header
+            cx = col * cell_w
+            ccx, ccy = cx + cell_w / 2, cy + cell_h / 2   # column/row centre
+            is_today = day == today.day
+            is_sunday = col == 6
+            is_holiday = (today.month, day) in holidays
+            if is_today:
+                draw.ellipse([ccx - highlight_d / 2, ccy - highlight_d / 2,
+                              ccx + highlight_d / 2, ccy + highlight_d / 2],
+                            fill=(*text_color, 235))
+            label = str(day)
+            lw = probe.textlength(label, font=grid_font)
+            if is_today:
+                day_rgba = today_number_rgba
+            elif is_sunday or is_holiday:
+                day_rgba = holiday_rgba
+            else:
+                day_rgba = text_rgba
+            draw.text((ccx - lw / 2, ccy - grid_font.size / 2),
+                      label, font=grid_font, fill=day_rgba)
+
+    holiday_top = grid_top + grid_h + holiday_gap_y
+    for i, line in enumerate(holiday_lines):
+        ly = holiday_top + i * holiday_line_h
+        draw.text((0, ly), line, font=grid_font, fill=holiday_rgba)
+
+    return img
+
+
+def _wrap_in_panel(content, pad, bg_color, bg_opacity, *, radius_frac=0.6, size_based_radius=False):
+    """Common look shared by the calendar, clock and status widgets: a
+    rounded translucent panel sized to `content` plus `pad` on every side,
+    with `content` composited on top. No panel at all (just `content` on
+    its own transparent canvas) when bg_opacity is 0.
+
+    `pad` is either a single number (same margin on every side) or an
+    (x, y) pair -- horizontal margin, vertical margin -- for a widget like
+    the clock whose text is wide but only one line tall, where an equal
+    pixel margin on every side reads as barely-there sideways and
+    disproportionate top/bottom.
+
+    `radius_frac` scales the corner radius off min(pad_x, pad_y) by default
+    (the calendar/status look, left exactly as it always was).
+
+    `size_based_radius` (the clock) scales off the panel's own shorter side
+    instead, ignoring padding and radius_frac entirely -- padding-based
+    rounding breaks down whenever padding itself is set small/tight (e.g.
+    panel_padding_y pulled down for a snug vertical fit), which otherwise
+    floors the radius near-flat no matter how big the panel actually is."""
+    pad_x, pad_y = pad if isinstance(pad, (tuple, list)) else (pad, pad)
+    panel_w = content.width + pad_x * 2
+    panel_h = content.height + pad_y * 2
+    widget = Image.new("RGBA", (panel_w, panel_h), (0, 0, 0, 0))
+    if bg_opacity > 0:
+        panel_draw = ImageDraw.Draw(widget)
+        bg_alpha = round(255 * bg_opacity)
+        if size_based_radius:
+            radius = max(8, min(60, round(min(panel_w, panel_h) * 0.28)))
+        else:
+            radius = max(4, min(60, round(min(pad_x, pad_y) * radius_frac)))
+        panel_draw.rounded_rectangle(
+            [0, 0, panel_w - 1, panel_h - 1], radius=radius,
+            fill=(*bg_color, bg_alpha))
+    widget.alpha_composite(content, (pad_x, pad_y))
+    return widget
+
+
+def _anchor_xy(position, offset_pct, widget_size):
+    """Top-left (x, y) to composite a widget of widget_size so it sits
+    inset from the named corner -- TL/TC/TR/BL/BC/BR, same scheme as
+    viewer.clock_position -- by offset_pct percent of the screen."""
+    x_pct, y_pct = offset_pct
+    ox = int(SCREEN_W * float(x_pct) / 100)
+    oy = int(SCREEN_H * float(y_pct) / 100)
+    w, h = widget_size
+    vert, horiz = position[0], position[1]
+    y = oy if vert == "T" else SCREEN_H - oy - h
+    if horiz == "L":
+        x = ox
+    elif horiz == "C":
+        x = (SCREEN_W - w) // 2
+    else:   # "R"
+        x = SCREEN_W - ox - w
+    return x, y
+
+
+def write_calendar(canvas):
+    """Composites the calendar widget onto `canvas` at its configured
+    top-left inset, on top of its own translucent background panel, if
+    calendar.enabled. Drawn independently of the weather line/dot grid --
+    it shows even with no weather data."""
+    settings = load_calendar_settings()
+    if not settings["enabled"]:
+        return
+
+    size = int(settings["size"])
+    grid_size = int(settings["grid_size"])
+    grid_row_gap = int(settings["grid_row_gap"])
+    text_color = tuple(int(v) for v in settings["text_color"])
+    text_opacity = max(0.0, min(1.0, float(settings["text_opacity"])))
+    bg_color = tuple(int(v) for v in settings["background_color"])
+    bg_opacity = max(0.0, min(1.0, float(settings["background_opacity"])))
+    holiday_color = HOLIDAY_PALETTE.get(settings["holiday_color"], HOLIDAY_PALETTE["dull_red"])
+
+    content = _calendar_widget_image(datetime.date.today(), FONT_PATH, size, grid_size,
+                                      grid_row_gap, text_color, text_opacity, holiday_color)
+
+    pad = max(6, round(size * _PANEL_PAD_FRAC))
+    widget = _wrap_in_panel(content, pad, bg_color, bg_opacity)
+
+    x_pct, y_pct = settings["offset_pct"]
+    x = int(SCREEN_W * float(x_pct) / 100)
+    y = int(SCREEN_H * float(y_pct) / 100)
+    canvas.alpha_composite(widget, (x, y))
+
+
+#: Used only if config.yaml has no "clock" section yet.
+DEFAULT_CLOCK_SETTINGS = {
+    "enabled": False,
+    "position": "TR",
+    "offset_pct": [3.0, 3.0],
+    "size": 64,
+    "format_24h": True,
+    "text_color": [255, 255, 255],
+    "text_opacity": 0.9,
+    "background_color": [0, 0, 0],
+    "background_opacity": 0.35,
+    "panel_padding_x": 40,
+    "panel_padding_y": 16,
+}
+
+
+def load_clock_settings():
+    """clock.* from config.yaml, read fresh every call so a change made on
+    the web Settings page (section "Clock") reaches this already-running
+    process without a restart."""
+    settings = dict(DEFAULT_CLOCK_SETTINGS)
+    try:
+        with open(_cfg_path, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    except OSError:
+        return settings
+    settings.update(cfg.get("clock") or {})
+    return settings
+
+
+def write_clock(canvas):
+    """Composites a custom-drawn clock onto `canvas`, on its own
+    translucent panel, if clock.enabled. This exists because PicFrame3's
+    own built-in clock (viewer.show_clock) is drawn by the core app, not
+    this overlay, so it can't get a panel -- this is a from-scratch
+    replacement for it, not something layered on top of it. Turn off
+    viewer.show_clock if you enable this, so you don't get two clocks."""
+    settings = load_clock_settings()
+    if not settings["enabled"]:
+        return
+
+    size = int(settings["size"])
+    text_color = tuple(int(v) for v in settings["text_color"])
+    text_opacity = max(0.0, min(1.0, float(settings["text_opacity"])))
+    bg_color = tuple(int(v) for v in settings["background_color"])
+    bg_opacity = max(0.0, min(1.0, float(settings["background_opacity"])))
+
+    try:
+        clock_font = ImageFont.truetype(FONT_PATH, size)
+    except OSError:
+        clock_font = ImageFont.truetype(
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size)
+
+    now = datetime.datetime.now()
+    time_fmt = "%H:%M" if settings["format_24h"] else "%-I:%M %p"
+    time_text = now.strftime(time_fmt)
+
+    probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    text_w = int(probe.textlength(time_text, font=clock_font))
+    ascent, descent = clock_font.getmetrics()
+    text_h = ascent + descent
+
+    text_alpha = max(0, min(255, round(255 * text_opacity)))
+    content = Image.new("RGBA", (text_w, text_h), (0, 0, 0, 0))
+    ImageDraw.Draw(content).text((0, 0), time_text, font=clock_font,
+                                  fill=(*text_color, text_alpha))
+
+    pad_x = max(0, int(settings.get("panel_padding_x", 40)))
+    pad_y = max(0, int(settings.get("panel_padding_y", 16)))
+    widget = _wrap_in_panel(content, (pad_x, pad_y), bg_color, bg_opacity, size_based_radius=True)
+
+    x, y = _anchor_xy(settings["position"], settings["offset_pct"],
+                      (widget.width, widget.height))
+    canvas.alpha_composite(widget, (x, y))
+
+
+#: Used only if config.yaml has no "status" section yet.
+DEFAULT_STATUS_SETTINGS = {
+    "enabled": True,
+    "position": "TR",
+    "offset_pct": [3.0, 3.0],
+    "size": 26,
+    "text_color": [255, 255, 255],
+    "text_opacity": 0.9,
+    "background_color": [0, 0, 0],
+    "background_opacity": 0.35,
+}
+
+
+def load_status_settings():
+    """status.* from config.yaml, read fresh every call so a change made on
+    the web Settings page (section "Status strip") reaches this already-
+    running process without a restart."""
+    settings = dict(DEFAULT_STATUS_SETTINGS)
+    try:
+        with open(_cfg_path, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    except OSError:
+        return settings
+    settings.update(cfg.get("status") or {})
+    return settings
+
+
+def _wifi_icon(size, linked, rgba):
+    """A small hand-drawn Wi-Fi glyph -- three nested arcs and a dot when
+    linked, one dim arc crossed out when not. Drawn with PIL primitives
+    rather than an emoji character, since the Pi's own fonts have no emoji
+    glyphs and would just show a missing-character box."""
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    cx, cy = size / 2, size - size / 6
+    width = max(2, round(size * 0.09))
+    dot_r = max(2, round(size * 0.06))
+    if linked:
+        for rad in (size * 0.42, size * 0.30, size * 0.18):
+            d.arc([cx - rad, cy - rad, cx + rad, cy + rad],
+                  start=215, end=325, fill=rgba, width=width)
+        d.ellipse([cx - dot_r, cy - dot_r, cx + dot_r, cy + dot_r], fill=rgba)
+    else:
+        rad = size * 0.42
+        d.arc([cx - rad, cy - rad, cx + rad, cy + rad],
+              start=215, end=325, fill=rgba, width=width)
+        d.ellipse([cx - dot_r, cy - dot_r, cx + dot_r, cy + dot_r], fill=rgba)
+        d.line([(size * 0.08, size * 0.12), (size * 0.92, size * 0.88)],
+              fill=rgba, width=width)
+    return img
+
+
+def _tm_status_text(tm):
+    """The Time Machine line's text, from the last report relayed over MQTT
+    by mac_timemachine_status.py. `tm` is the module-level tm_backup dict."""
+    status, age_h, percent = tm["status"], tm["age_h"], tm["percent"]
+    gb_done, gb_total = tm["gb_done"], tm["gb_total"]
+    if status == "running":
+        if percent is None:
+            return "TM: backup running"
+        if gb_done is not None and gb_total is not None:
+            return f"TM: {percent:.0f}% ({gb_done:.1f}/{gb_total:.1f} GB)"
+        return f"TM: {percent:.0f}%"
+    if status == "error":
+        return "TM: backup error"
+    if age_h is None:
+        return f"TM: {status}"
+    age_text = f"{round(age_h)}h ago" if age_h >= 1 else f"{max(1, round(age_h * 60))}m ago"
+    prefix = "stale, last " if status == "stale" else "last "
+    return f"TM: {prefix}{age_text}"
+
+
+def write_status(canvas):
+    """Composites the status strip onto `canvas`, on its own translucent
+    panel, if status.enabled. First line -- a Wi-Fi glyph plus whether the
+    outdoor Pico W is still being heard from, using the exact same freshness
+    check (OUTDOOR_MAX_AGE) the main loop already uses to decide whether to
+    fall back to OpenWeather, so this always agrees with what's actually
+    driving the outdoor reading. Second line -- the Time Machine backup
+    state relayed from the Mac, shown only once something has actually been
+    heard from it (and hidden again if it goes quiet for TM_REPORT_MAX_AGE,
+    same idea as the Wi-Fi line), so a frame with no Mac script configured
+    still shows just the one line, unchanged."""
+    settings = load_status_settings()
+    if not settings["enabled"]:
+        return
+
+    size = int(settings["size"])
+    text_color = tuple(int(v) for v in settings["text_color"])
+    text_opacity = max(0.0, min(1.0, float(settings["text_opacity"])))
+    bg_color = tuple(int(v) for v in settings["background_color"])
+    bg_opacity = max(0.0, min(1.0, float(settings["background_opacity"])))
+
+    try:
+        status_font = ImageFont.truetype(FONT_PATH, size)
+    except OSError:
+        status_font = ImageFont.truetype(
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size)
+
+    linked = (outdoor["temp"] is not None
+             and time.monotonic() - outdoor["time"] <= OUTDOOR_MAX_AGE)
+    line1 = f"Out sensor {'OK' if linked else 'down'}"
+
+    show_tm = (tm_backup["status"] is not None
+              and time.monotonic() - tm_backup["time"] <= TM_REPORT_MAX_AGE)
+    line2 = _tm_status_text(tm_backup) if show_tm else None
+
+    text_alpha = max(0, min(255, round(255 * text_opacity)))
+    probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    ascent, descent = status_font.getmetrics()
+    line_h = ascent + descent
+    w1 = int(probe.textlength(line1, font=status_font))
+    w2 = int(probe.textlength(line2, font=status_font)) if line2 else 0
+
+    icon_size = line_h
+    icon_gap = max(4, round(size * 0.3))
+    icon = _wifi_icon(icon_size, linked, (*text_color, text_alpha))
+
+    row_gap = max(2, round(size * 0.3))
+    text_x = icon_size + icon_gap
+    content_w = max(text_x + w1, text_x + w2)
+    content_h = line_h + (row_gap + line_h if line2 else 0)
+
+    content = Image.new("RGBA", (content_w, content_h), (0, 0, 0, 0))
+    cdraw = ImageDraw.Draw(content)
+    content.alpha_composite(icon, (0, 0))
+    cdraw.text((text_x, 0), line1, font=status_font, fill=(*text_color, text_alpha))
+    if line2:
+        cdraw.text((text_x, line_h + row_gap), line2, font=status_font,
+                   fill=(*text_color, text_alpha))
+
+    pad = max(6, round(size * _PANEL_PAD_FRAC))
+    widget = _wrap_in_panel(content, pad, bg_color, bg_opacity)
+
+    x, y = _anchor_xy(settings["position"], settings["offset_pct"],
+                      (widget.width, widget.height))
+    canvas.alpha_composite(widget, (x, y))
+
+
+def _wrap_text(draw, text, font, max_width):
+    """Exact replica of picframe3's gfx/textstyle.py _wrap()."""
+    lines = []
+    for paragraph in text.split("\n"):
+        if not paragraph:
+            lines.append("")
+            continue
+        words = paragraph.split(" ")
+        line = ""
+        for word in words:
+            probe = f"{line} {word}".strip()
+            if draw.textlength(probe, font=font) <= max_width or not line:
+                line = probe
+            else:
+                lines.append(line)
+                line = word
+        lines.append(line)
+    return lines
+
+
+def _caption_box(text, font):
+    """Where PicFrame3's native caption line would be drawn (BR position,
+    which is what this config uses), replicating gfx/overlays.py:clock()."""
+    probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    max_width = int(SCREEN_W * MAX_WIDTH_FRAC)
+    lines = _wrap_text(probe, text, font, max_width)
+    ascent, descent = font.getmetrics()
+    line_h = int((ascent + descent) * LINE_SPACING)
+    width = max(1, int(max(probe.textlength(ln, font=font) for ln in lines))) + PAD * 2
+    height = line_h * len(lines) + PAD * 2
+    dx = int(SCREEN_W * CLOCK_OFFSET_PCT[0] / 100)
+    dy = int(SCREEN_H * CLOCK_OFFSET_PCT[1] / 100)
+    right_edge = SCREEN_W - dx
+    bottom_edge = SCREEN_H - dy   # derived identity -- see module docstring above
+    left = right_edge - width
+    top = bottom_edge - height
+    return left, top, width, height, lines, line_h
+
+
+def _dot_grid_image(filled, dot_d, gap, rows=4, cols=4, filled_alpha=235, unfilled_alpha=60):
+    w = cols * dot_d + (cols - 1) * gap
+    h = rows * dot_d + (rows - 1) * gap
+    ss = 4   # supersample for anti-aliased circles
+    hi = Image.new("RGBA", (w * ss, h * ss), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(hi)
+    d, g = dot_d * ss, gap * ss
+    for i in range(rows * cols):
+        row, col = divmod(i, cols)
+        x0, y0 = col * (d + g), row * (d + g)
+        color = (255, 255, 255, filled_alpha) if i < filled else (255, 255, 255, unfilled_alpha)
+        draw.ellipse([x0, y0, x0 + d, y0 + d], fill=color)
+    return hi.resize((w, h), Image.LANCZOS)
+
+
+def write_overlay(line_text, filled_dots):
+    """Draws the weather line + idle-countdown dot grid as one PNG and
+    writes it (atomically) to OVERLAY_IMAGE for PicFrame3 to pick up."""
+    try:
+        caption_font = ImageFont.truetype(FONT_PATH, max(11, int(CLOCK_SIZE * EXTRA_SCALE)))
+    except OSError:
+        caption_font = ImageFont.truetype(
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            max(11, int(CLOCK_SIZE * EXTRA_SCALE)))
+
+    canvas = Image.new("RGBA", (SCREEN_W, SCREEN_H), (0, 0, 0, 0))
+    alpha = int(255 * max(0.0, min(1.0, CLOCK_OPACITY)))
+
+    write_calendar(canvas)
+    write_clock(canvas)
+    write_status(canvas)
+
+    if line_text:
+        overlay_settings = load_overlay_settings()
+        bg_opacity = max(0.0, min(1.0, float(overlay_settings.get("background_opacity", 0.0))))
+
+        if bg_opacity <= 0:
+            # Original look -- drop-shadowed text, no panel, dot grid
+            # positioned to its left. Unchanged, so an install that never
+            # touches overlay.background_opacity sees no visual change.
+            left, top, width, height, lines, line_h = _caption_box(line_text, caption_font)
+
+            cap_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            cdraw = ImageDraw.Draw(cap_img)
+            for i, ln in enumerate(lines):
+                cdraw.text((PAD, PAD + i * line_h), ln, font=caption_font, fill=(255, 255, 255, alpha))
+            shadow_mask = cap_img.split()[-1].filter(ImageFilter.GaussianBlur(SHADOW_RADIUS))
+            shadow = Image.new("RGBA", cap_img.size, (0, 0, 0, 0))
+            shadow.putalpha(shadow_mask.point(lambda v: int(v * SHADOW_OPACITY)))
+            composed = Image.alpha_composite(shadow, cap_img)
+            canvas.alpha_composite(composed, (left, top))
+
+            if filled_dots is not None:
+                side = max(1, round(overlay_settings["dot_count"] ** 0.5))
+                # Size the grid to the actual pixel height of a capital "O"
+                # in this font/size -- NOT line_h, which also reserves room
+                # for ascenders/descenders/line-spacing and made the grid
+                # come out roughly 2x taller than any single letter.
+                cap_bbox = caption_font.getbbox("O")
+                cap_h = cap_bbox[3] - cap_bbox[1]
+                gap = max(2, round(cap_h * 0.12))
+                dot_d = max(4, round((cap_h - (side - 1) * gap) / side))
+                grid = _dot_grid_image(filled_dots, dot_d, gap, rows=side, cols=side,
+                                       filled_alpha=overlay_settings["filled_alpha"],
+                                       unfilled_alpha=overlay_settings["unfilled_alpha"])
+                grid_x = left - overlay_settings["gap_to_text"] - grid.width
+                # Centered on the actual INK of the drawn text (cap_img's own
+                # bbox of non-transparent pixels), not the nominal line_h/PAD
+                # box -- that box reserves more room above and below the
+                # glyphs than the glyphs themselves use (for line-spacing and
+                # descenders), so centering on the box put the grid visibly
+                # low relative to what a reader actually sees. Using the ink
+                # bbox instead is correct for one line and for several.
+                ink_bbox = cap_img.getbbox()
+                if ink_bbox is not None:
+                    ink_center = (ink_bbox[1] + ink_bbox[3]) // 2
+                else:
+                    ink_center = height // 2
+                grid_y = top + ink_center - grid.height // 2
+                canvas.alpha_composite(grid, (grid_x, grid_y))
+
+        else:
+            # Panelled look -- the caption text and the dot grid are
+            # combined side by side into one content image, then the whole
+            # thing gets the same rounded translucent panel as the
+            # calendar/clock/status widgets, anchored to the same
+            # bottom-right spot the old drop-shadowed text used.
+            probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+            max_width = int(SCREEN_W * MAX_WIDTH_FRAC)
+            lines = _wrap_text(probe, line_text, caption_font, max_width)
+            ascent, descent = caption_font.getmetrics()
+            line_h = int((ascent + descent) * LINE_SPACING)
+            text_w = max(1, int(max(probe.textlength(ln, font=caption_font) for ln in lines)))
+            text_h = line_h * len(lines)
+
+            text_img = Image.new("RGBA", (text_w, text_h), (0, 0, 0, 0))
+            tdraw = ImageDraw.Draw(text_img)
+            for i, ln in enumerate(lines):
+                tdraw.text((0, i * line_h), ln, font=caption_font, fill=(255, 255, 255, alpha))
+
+            grid_img = None
+            if filled_dots is not None:
+                side = max(1, round(overlay_settings["dot_count"] ** 0.5))
+                cap_bbox = caption_font.getbbox("O")
+                cap_top, cap_h = cap_bbox[1], cap_bbox[3] - cap_bbox[1]
+                gap = max(2, round(cap_h * 0.12))
+                dot_d = max(4, round((cap_h - (side - 1) * gap) / side))
+                grid_img = _dot_grid_image(filled_dots, dot_d, gap, rows=side, cols=side,
+                                           filled_alpha=overlay_settings["filled_alpha"],
+                                           unfilled_alpha=overlay_settings["unfilled_alpha"])
+
+            gap_to_text = overlay_settings["gap_to_text"]
+            combined_w = (grid_img.width + gap_to_text + text_w) if grid_img is not None else text_w
+            combined_h = max(text_h, grid_img.height if grid_img is not None else 0)
+
+            content = Image.new("RGBA", (combined_w, combined_h), (0, 0, 0, 0))
+            text_x = (grid_img.width + gap_to_text) if grid_img is not None else 0
+            text_y = (combined_h - text_h) // 2
+            content.alpha_composite(text_img, (text_x, text_y))
+            if grid_img is not None:
+                # Centered on the text's own ink (same reasoning as the
+                # panel-off branch above), not on text_h's nominal box.
+                ink_bbox = text_img.getbbox()
+                if ink_bbox is not None:
+                    ink_center = text_y + (ink_bbox[1] + ink_bbox[3]) // 2
+                else:
+                    ink_center = combined_h // 2
+                grid_y = max(0, min(combined_h - grid_img.height, ink_center - grid_img.height // 2))
+                content.alpha_composite(grid_img, (0, grid_y))
+
+            pad = max(0, int(overlay_settings.get("background_padding", 20)))
+            bg_color = tuple(int(v) for v in overlay_settings.get("background_color", [0, 0, 0]))
+            widget = _wrap_in_panel(content, pad, bg_color, bg_opacity)
+
+            x, y = _anchor_xy("BR", list(CLOCK_OFFSET_PCT), (widget.width, widget.height))
+            canvas.alpha_composite(widget, (x, y))
+
+    tmp = OVERLAY_IMAGE + ".tmp.png"
+    canvas.save(tmp)
+    os.replace(tmp, OVERLAY_IMAGE)
+
+
+def fetch_outside():
+    try:
+        with urllib.request.urlopen(WEATHER_URL, timeout=10) as r:
+            data = json.load(r)
+        return data["main"]["temp"]
+    except Exception as e:
+        print(f"Weather fetch failed: {e}", flush=True)
+        return None
+
+sensor = adafruit_dht.DHT11(board.D4)   # GPIO 4 = physical pin 7
+
+outdoor = {"temp": None, "hum": None, "time": 0.0}   # last reading from the Pico W
+pm25 = {"value": None, "time": 0.0}                  # last reading from the PMS5003
+pm10 = {"value": None, "time": 0.0}                  # last reading from the PMS5003
+# Last Time Machine report relayed from the Mac (mac_timemachine_status.sh via MQTT).
+# "time" here is when WE last heard from it (time.monotonic()), not the backup's own
+# timestamp -- that's what lets write_status() notice the Mac itself has gone quiet
+# (asleep, off, launchd job stopped) even if "status" is stuck on a stale "ok".
+tm_backup = {"status": None, "age_h": None, "percent": None,
+            "gb_done": None, "gb_total": None, "time": 0.0}
+PM25_MAX_AGE = 5 * 60   # seconds; older than this -> treat as "no reading"
+
+# CPCB (Indian) AQI breakpoints: (conc_lo, conc_hi, aqi_lo, aqi_hi).
+# From CPCB's official AQI calculator (app.cpcbccr.com). This gives a live
+# PM-only approximation -- the official AQI uses a 24-hour average and at
+# least 3 pollutants; here it is instantaneous PM2.5/PM10 only.
+PM25_BREAKPOINTS = [
+    (0, 30, 0, 50), (31, 60, 51, 100), (61, 90, 101, 200),
+    (91, 120, 201, 300), (121, 250, 301, 400), (251, 380, 401, 500),
+]
+PM10_BREAKPOINTS = [
+    (0, 50, 0, 50), (51, 100, 51, 100), (101, 250, 101, 200),
+    (251, 350, 201, 300), (351, 430, 301, 400), (431, 510, 401, 500),
+]
+
+def cpcb_sub_index(conc, breakpoints):
+    if conc is None:
+        return None
+    conc = max(0, conc)
+    for lo, hi, aqi_lo, aqi_hi in breakpoints:
+        if lo <= conc <= hi:
+            return round((aqi_hi - aqi_lo) / (hi - lo) * (conc - lo) + aqi_lo)
+    return 500   # above the top breakpoint -- cap rather than extrapolate
+
+def cpcb_aqi(pm25_val, pm10_val):
+    candidates = [v for v in (
+        cpcb_sub_index(pm25_val, PM25_BREAKPOINTS),
+        cpcb_sub_index(pm10_val, PM10_BREAKPOINTS),
+    ) if v is not None]
+    return max(candidates) if candidates else None
+
+def on_connect(client, userdata, flags, reason_code, properties):
+    client.subscribe(TOPIC_OUTDOOR)      # re-subscribes after any reconnect
+    client.subscribe(TOPIC_OUTDOOR_HUM)
+    client.subscribe(TOPIC_INDOOR_PM25)
+    client.subscribe(TOPIC_INDOOR_PM10)
+    client.subscribe(TOPIC_TM_STATUS)
+    client.subscribe(TOPIC_TM_AGE_H)
+    client.subscribe(TOPIC_TM_PERCENT)
+    client.subscribe(TOPIC_TM_GB_DONE)
+    client.subscribe(TOPIC_TM_GB_TOTAL)
+
+def on_message(client, userdata, msg):
+    if msg.topic == TOPIC_TM_STATUS:
+        # A word, not a number -- handled before the float parse below, which
+        # would otherwise reject it and silently drop every message.
+        status = msg.payload.decode().strip()
+        if status in ("ok", "running", "stale", "error"):
+            tm_backup["status"] = status
+            tm_backup["time"] = time.monotonic()
+        return
+    try:
+        value = float(msg.payload.decode())
+    except ValueError:
+        return
+    if msg.topic == TOPIC_OUTDOOR and -20 <= value <= 60:   # ignore bad readings
+        outdoor["temp"] = value
+        outdoor["time"] = time.monotonic()
+    elif msg.topic == TOPIC_OUTDOOR_HUM and 0 <= value <= 100:
+        outdoor["hum"] = value
+    elif msg.topic == TOPIC_INDOOR_PM25 and 0 <= value <= 1000:
+        pm25["value"] = value
+        pm25["time"] = time.monotonic()
+    elif msg.topic == TOPIC_INDOOR_PM10 and 0 <= value <= 2000:
+        pm10["value"] = value
+        pm10["time"] = time.monotonic()
+    elif msg.topic == TOPIC_TM_AGE_H and value >= 0:
+        tm_backup["age_h"] = value
+        tm_backup["time"] = time.monotonic()
+    elif msg.topic == TOPIC_TM_PERCENT and 0 <= value <= 100:
+        tm_backup["percent"] = value
+        tm_backup["time"] = time.monotonic()
+    elif msg.topic == TOPIC_TM_GB_DONE and value >= 0:
+        tm_backup["gb_done"] = value
+        tm_backup["time"] = time.monotonic()
+    elif msg.topic == TOPIC_TM_GB_TOTAL and value >= 0:
+        tm_backup["gb_total"] = value
+        tm_backup["time"] = time.monotonic()
+
+client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+client.on_connect = on_connect
+client.on_message = on_message
+client.connect(BROKER, PORT, keepalive=60)
+client.loop_start()
+
+outside = None
+source = None
+last_weather = -WEATHER_INTERVAL   # forces a fetch when the sensor is not available
+
+try:
+    while True:
+        now = time.monotonic()
+        if outdoor["temp"] is not None and now - outdoor["time"] <= OUTDOOR_MAX_AGE:
+            if source != "outdoor sensor":
+                print("Outside temperature: using the outdoor sensor", flush=True)
+            outside, source = outdoor["temp"], "outdoor sensor"
+            client.publish(TOPIC_OUT, f"{outside}", retain=True)
+            if outdoor["hum"] is not None:
+                client.publish(TOPIC_JSON, json.dumps(
+                    {"outdoor_humidity": outdoor["hum"]}), retain=True)
+        else:
+            if source == "outdoor sensor":
+                print("Outdoor sensor silent, falling back to OpenWeather", flush=True)
+                outside, source = None, None
+                last_weather = -WEATHER_INTERVAL   # fetch right away
+            if now - last_weather >= WEATHER_INTERVAL:
+                new = fetch_outside()
+                if new is not None:
+                    outside, source = new, "OpenWeather"
+                    client.publish(TOPIC_OUT, f"{outside}", retain=True)
+                last_weather = time.monotonic()
+
+        try:
+            temperature = sensor.temperature
+            humidity = sensor.humidity
+            if temperature is None or humidity is None:
+                raise RuntimeError("Empty reading")
+
+            client.publish(TOPIC_TEMP, f"{temperature}", retain=True)
+            client.publish(TOPIC_HUM, f"{humidity}", retain=True)
+            client.publish(TOPIC_JSON, json.dumps(
+                {"temperature": temperature, "humidity": humidity}), retain=True)
+
+            out_temp_txt = f"{outside:.0f}°C" if outside is not None else "--"
+            out_hum_txt = "--"
+            if source == "outdoor sensor" and outdoor["hum"] is not None:
+                out_hum_txt = f"{outdoor['hum']:.0f}%"
+            now_m = time.monotonic()
+            pm25_fresh = pm25["value"] if (pm25["value"] is not None and now_m - pm25["time"] <= PM25_MAX_AGE) else None
+            pm10_fresh = pm10["value"] if (pm10["value"] is not None and now_m - pm10["time"] <= PM25_MAX_AGE) else None
+            aqi = cpcb_aqi(pm25_fresh, pm10_fresh)
+            pm25_txt = f"{aqi}" if aqi is not None else "--"
+            filled_dots = None
+            try:
+                with open(COUNTDOWN_FILE, "r", encoding="utf-8") as f:
+                    filled_dots = int(f.read().strip())
+            except (FileNotFoundError, ValueError):
+                pass   # motion-display not running yet / countdown not written
+
+            line = (f"Out {out_temp_txt}|Hum {out_hum_txt}|"
+                    f"In {temperature}°C|Hum {humidity}%|AQI {pm25_txt}")
+
+            # clock_extra_file is left empty: the weather line + dot grid
+            # are drawn ourselves as one image (see write_overlay above),
+            # not through PicFrame3's own sparse-glyph text renderer.
+            write_extra("")
+            write_overlay(line, filled_dots)
+            print(f"Published: {line}  (dots={filled_dots})", flush=True)
+
+        except RuntimeError as error:
+            print(error.args[0], flush=True)
+            time.sleep(2.0)
+            continue
+
+        time.sleep(INTERVAL)
+
+except KeyboardInterrupt:
+    pass
+finally:
+    sensor.exit()
+    client.loop_stop()
+    client.disconnect()

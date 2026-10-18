@@ -1,0 +1,1561 @@
+/* picframe3 web UI — no build step, no framework, no external requests. */
+"use strict";
+
+const $ = (sel) => document.querySelector(sel);
+const api = async (path, options) => {
+  const res = await fetch(path, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.status === 204 ? null : res.json();
+};
+const send = (action, payload = {}) =>
+  api("/api/command", { method: "POST", body: JSON.stringify({ action, ...payload }) });
+
+let state = null;
+let currentId = null;
+let dragging = false;
+
+/* ---------------------------------------------------------------- tabs */
+document.querySelectorAll(".tab").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach((t) => t.classList.remove("is-active"));
+    document.querySelectorAll(".view").forEach((v) => v.classList.remove("is-active"));
+    tab.classList.add("is-active");
+    $(`#view-${tab.dataset.view}`).classList.add("is-active");
+    if (tab.dataset.view === "library") loadLibrary();
+    if (tab.dataset.view === "removed") loadRemoved();
+    if (tab.dataset.view === "settings") loadSettings();
+  });
+});
+
+/* ------------------------------------------------------------- controls */
+$("#prev").onclick = () => send("previous");
+$("#next").onclick = () => send("next");
+$("#pause").onclick = () => send("toggle_pause");
+$("#power").onclick = () => send("display_toggle");
+/* Both halves of one button: reveal the caption for viewer.peek_seconds, or
+   take it away again now. A frame configured with `text_seconds: 0` writes
+   nothing until this is pressed. */
+$("#caption").onclick = () => send(state?.show_info ? "info_hide" : "info_show");
+$("#del").onclick = async () => {
+  if (!confirm("Move this picture out of the library?")) return;
+  try {
+    await send("delete");
+  } catch (err) {
+    // The one action the owner can switch off for the network (http.allow_delete).
+    // Saying so beats a button that appears to do nothing.
+    $("#saved").textContent =
+      "Removing pictures over the network is switched off — see Settings, " +
+      "Web interface, “Remove pictures from the network”.";
+  }
+};
+$("#rescan").onclick = () => send("rescan");
+
+/* The frame has no desktop and so no screenshot tool; it reads its own
+   framebuffer back instead. Useful when something looks wrong on the wall. */
+let liveUrl = null;
+$("#shot").onclick = async () => {
+  const button = $("#shot");
+  if (liveUrl) return showThumbnail();
+  button.disabled = true;
+  button.textContent = "Capturing…";
+  try {
+    const res = await fetch("/api/screenshot", { cache: "no-store" });
+    if (!res.ok) throw new Error(await res.text());
+    liveUrl = URL.createObjectURL(await res.blob());
+    const img = $("#preview");
+    img.src = liveUrl;
+    img.hidden = false;
+    $("#preview-empty").hidden = true;
+    $("#live-badge").hidden = false;
+    button.textContent = "Show thumbnail";
+  } catch (err) {
+    button.textContent = "Screenshot failed";
+    setTimeout(() => (button.textContent = "Screenshot"), 2500);
+  } finally {
+    button.disabled = false;
+  }
+};
+
+function showThumbnail() {
+  if (liveUrl) URL.revokeObjectURL(liveUrl);
+  liveUrl = null;
+  currentId = null;              // force render() to reload the thumbnail
+  $("#live-badge").hidden = true;
+  $("#shot").textContent = "Screenshot";
+  if (state) render(state);
+}
+
+const brightness = $("#brightness");
+brightness.oninput = () => ($("#brightness-out").textContent = `${brightness.value}%`);
+brightness.onchange = () => send("brightness", { value: brightness.value / 100 });
+
+const interval = $("#interval");
+interval.oninput = () => ($("#interval-out").textContent = interval.value);
+interval.onchange = () =>
+  send("set_config", { key: "slideshow.interval", value: Number(interval.value) });
+
+document.addEventListener("keydown", (e) => {
+  if (/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
+  const map = { ArrowRight: "next", ArrowLeft: "previous", " ": "toggle_pause", p: "toggle_pause" };
+  if (map[e.key]) { e.preventDefault(); send(map[e.key]); }
+});
+
+/* A thumbnail URL that changes when the picture behind it does.  Ids are
+   SQLite rowids: reindex the library and id 59 is a different photograph, so
+   a URL of `/photo/59/thumb` alone is cached by the browser for a day and
+   then drawn beside the caption of whatever holds that id now.  The file's
+   mtime in the query string is what makes the cached copy safe. */
+function thumbKey(p) {
+  return `${p.id}:${Math.round(p.mtime || 0)}`;
+}
+
+function thumbUrl(p) {
+  return `/api/library/photo/${p.id}/thumb?v=${Math.round(p.mtime || 0)}`;
+}
+
+/* ---------------------------------------------------------------- state */
+function render(next) {
+  state = next;
+  $("#live").classList.toggle("on", !!state.running);
+  const d = state.display || {};
+  $("#display-info").textContent = d.width
+    ? `${d.width}×${d.height} · ${d.refresh_hz}Hz · ${d.backend}`
+    : "";
+
+  const cur = state.current || {};
+  if (liveUrl) {
+    // a captured frame is on display; leave it alone until dismissed
+  } else if (cur.id && thumbKey(cur) !== currentId) {
+    // Keyed on the file, not on the id: an id is a SQLite rowid and a rescan
+    // hands it to a different picture, which the browser would then answer
+    // from its own cache -- yesterday's photograph under today's caption.
+    currentId = thumbKey(cur);
+    const img = $("#preview");
+    img.src = thumbUrl(cur);
+    img.hidden = false;
+    $("#preview-empty").hidden = true;
+  } else if (!cur.id && !liveUrl) {
+    $("#preview").hidden = true;
+    $("#preview-empty").hidden = false;
+    currentId = null;
+  }
+
+  $("#title").textContent = cur.title || cur.basename || "—";
+  const bits = [];
+  if (cur.taken_at) bits.push(new Date(cur.taken_at * 1000).toLocaleDateString(undefined,
+    { day: "numeric", month: "long", year: "numeric" }));
+  if (cur.location) bits.push(cur.location);
+  if (cur.folder) bits.push(cur.folder.split("/").pop());
+  $("#subtitle").textContent = bits.join("  ·  ");
+
+  const FIT_WORDS = {
+    cover: "cropped to fill the screen",
+    contain: "whole, on a plain background",
+    blur: "whole, on a blurred background",
+    mat: "whole, in a mat",
+  };
+  const chips = [];
+  if (cur.shown_as) chips.push(`Shown ${FIT_WORDS[cur.shown_as] || cur.shown_as}`);
+  if (cur.caption) chips.push(cur.caption);
+  // Pixel size, because "why was this cropped?" is nearly always answered by
+  // comparing the picture's shape with the panel's.
+  if (cur.width && cur.height) chips.push(`${fmt(cur.width)} × ${fmt(cur.height)}`);
+  if (cur.model) chips.push([cur.make, cur.model].filter(Boolean).join(" ").replace(/^(\S+) \1/, "$1"));
+  if (cur.f_number) chips.push(`f/${cur.f_number}`);
+  if (cur.exposure_time) chips.push(cur.exposure_time);
+  if (cur.iso) chips.push(`ISO ${cur.iso}`);
+  if (cur.focal_length) chips.push(`${cur.focal_length}mm`);
+  (cur.tags || []).forEach((t) => chips.push(`#${t}`));
+  $("#exif").innerHTML = chips.map((c) => `<li>${escapeHtml(c)}</li>`).join("");
+
+  $("#pause").textContent = state.paused ? "Resume" : "Pause";
+  $("#power").textContent = state.display_on ? "Screen off" : "Screen on";
+  $("#caption").textContent = state.show_info ? "Hide caption" : "Show caption";
+
+  if (!dragging) {
+    brightness.value = Math.round((state.brightness ?? 1) * 100);
+    $("#brightness-out").textContent = `${brightness.value}%`;
+    interval.value = Math.round(state.interval ?? 180);
+    $("#interval-out").textContent = interval.value;
+  }
+
+  const pct = state.interval > 0
+    ? 100 * (1 - Math.min(1, (state.next_change_in || 0) / state.interval)) : 0;
+  $("#progress-bar").style.width = `${pct}%`;
+
+  renderRestartNotice();
+  // No systemd, no power-off: a button that could only ever report a failure
+  // is worse than no button.
+  $("#shutdown").hidden = state.can_shutdown === false;
+
+  const filters = state.filters || {};
+  if (filterHasLanded(filters)) {
+    previewing = false;
+    if (gridWaiting) { gridWaiting = false; loadLibrary(); }
+  }
+  const pill = $("#filter-count");
+  if (pill && !previewing) {
+    const total = (state.library || {}).files || 0;
+    pill.textContent = filters.active
+      ? `${fmt(state.playlist_size)} of ${fmt(total)} pictures`
+      : `all ${fmt(total)} pictures`;
+    pill.className = filters.active ? "pill is-filtered" : "pill";
+  }
+  showFilter(filters);
+
+  const lib = state.library || {};
+  const gone = state.removed || {};
+  $("#stats").innerHTML = [
+    ["Pictures", fmt(lib.files)],
+    ["Videos", fmt(lib.videos)],
+    ...(gone.count ? [["Removed", fmt(gone.count)]] : []),
+    ["In playlist", fmt(state.playlist_size)],
+    ["Round", `${fmt(state.playlist_round)} · ${fmt(state.playlist_remaining)} left`],
+    ["Times shown", lib.shown_max === lib.shown_min
+      ? fmt(lib.shown_min) : `${fmt(lib.shown_min)}–${fmt(lib.shown_max)}`],
+    ["Next in", state.paused ? "paused" : `${Math.round(state.next_change_in || 0)}s`],
+    ["Frame rate", `${state.fps ?? 0}/s`],
+    ["Uptime", duration(state.uptime)],
+    ...healthTiles(state.health || {}),
+  ].map(([k, v, cls]) => `<div${cls ? ` class="${cls}"` : ""}><dt>${k}</dt><dd>${v}</dd></div>`)
+    .join("");
+}
+
+/* How the Pi itself is doing.  Every reading is optional: a machine that
+   cannot measure its own temperature shows no temperature tile rather than a
+   tile reading "—", and the row simply gets shorter. */
+function healthTiles(h) {
+  const tiles = [];
+  if (h.cpu_temp != null)
+    tiles.push(["CPU temperature", `${h.cpu_temp.toFixed(1)} °C`,
+                h.cpu_temp >= 80 ? "warn" : ""]);
+  if (h.cpu_percent != null) tiles.push(["CPU load", `${h.cpu_percent}%`]);
+  if (h.memory_percent != null) tiles.push(["Memory used", `${h.memory_percent}%`]);
+  if (h.disk_free != null)
+    tiles.push(["Free space", `${(h.disk_free / 1073741824).toFixed(1)} GiB`,
+                h.disk_free < 536870912 ? "warn" : ""]);
+  // Worth its own tile only when there is something to say: an undervoltage
+  // flag the firmware set at 3am is the whole reason for measuring at all.
+  if (h.undervoltage || h.undervoltage_since_boot)
+    tiles.push(["Power supply", h.undervoltage ? "undervoltage" : "dip recorded",
+                "warn"]);
+  return tiles;
+}
+
+[brightness, interval].forEach((el) => {
+  el.addEventListener("pointerdown", () => (dragging = true));
+  el.addEventListener("pointerup", () => setTimeout(() => (dragging = false), 400));
+});
+
+/* ------------------------------------------------------------ streaming */
+function connect() {
+  const es = new EventSource("/api/events");
+  es.onmessage = (e) => { try { render(JSON.parse(e.data)); } catch (_) {} };
+  es.onerror = () => {
+    $("#live").classList.remove("on");
+    es.close();
+    setTimeout(connect, 3000);
+  };
+}
+connect();
+api("/api/state").then(render).catch(() => {});
+setInterval(() => { if (state && !state.paused) {
+  state.next_change_in = Math.max(0, (state.next_change_in || 0) - 1);
+  const pct = state.interval > 0 ? 100 * (1 - state.next_change_in / state.interval) : 0;
+  $("#progress-bar").style.width = `${pct}%`;
+} }, 1000);
+
+/* --------------------------------------------------------------- filter */
+/* Everything in this panel changes what the frame shows, not what the grid
+   shows.  Typing counts (a preview, cheap, applies nothing); leaving a box or
+   picking from a dropdown applies.  Applying mid-keystroke would send the
+   picture on the wall somewhere new on every letter. */
+
+const FILTER_FIELDS = () => document.querySelectorAll("[data-filter]");
+let filterTimer = null;
+let filterKnown = false;      // the option lists are fetched once
+let previewing = false;       // an edit that has not been applied yet
+let gridWaiting = false;      // a grid reload waiting for the frame to catch up
+
+function filterPatch() {
+  const patch = {};
+  FILTER_FIELDS().forEach((el) => {
+    patch[el.dataset.filter] = el.type === "checkbox" ? el.checked : el.value.trim();
+  });
+  return patch;
+}
+
+async function applyFilter(patch) {
+  clearTimeout(filterTimer);
+  previewing = false;
+  // Both flags before the request, not after it: the frame usually publishes
+  // the new state before the POST has even been read back here, and a flag
+  // set after that would never be looked at again.  The grid is then
+  // reloaded when the state says the filter has landed, rather than after a
+  // guessed delay -- a race the slow case always loses.
+  gridWaiting = true;
+  // Narrowing the slideshow and then browsing the whole library is not what
+  // anyone means; "show everything" puts the grid back too.
+  $("#only-selected").checked = !(patch && patch.reset);
+  await api("/api/filters", {
+    method: "POST",
+    body: JSON.stringify(patch || filterPatch()),
+  });
+}
+
+/* Has the frame caught up with what the panel is asking for? */
+function filterHasLanded(f) {
+  const panel = filterPatch();
+  const folderMatches = f.folder_choice === "(other)"
+    ? true : (f.subfolder || "") === panel.folder;
+  return folderMatches
+    && (f.tags_text || "") === panel.tags
+    && !!f.tags_match_all === panel.tags_match_all
+    && (f.location_contains || "") === panel.location
+    && (f.date_from_text || "") === panel.date_from
+    && (f.date_to_text || "") === panel.date_to;
+}
+
+async function previewFilter() {
+  const pill = $("#filter-count");
+  // Nothing to preview when the frame is already showing exactly this: the
+  // applied count is the better thing to be looking at.
+  if (state && filterHasLanded(state.filters || {})) return;
+  try {
+    const { matching } = await api("/api/filters/preview", {
+      method: "POST", body: JSON.stringify(filterPatch()),
+    });
+    previewing = true;
+    pill.textContent = `${fmt(matching)} would be showing`;
+    pill.className = "pill is-preview";
+  } catch (_) { /* the applied count comes back on the next state anyway */ }
+}
+
+FILTER_FIELDS().forEach((el) => {
+  el.addEventListener("change", () => applyFilter());
+  if (el.type === "text") {
+    el.addEventListener("input", () => {
+      clearTimeout(filterTimer);
+      filterTimer = setTimeout(previewFilter, 300);
+    });
+  }
+});
+
+/* The rolling date windows.  The buttons send the rule -- "the last 7 days" --
+   and never the two dates it happens to resolve to today, which is what keeps
+   the filter honest a month later. */
+async function loadDateWindows() {
+  const holder = $("#f-windows");
+  if (!holder || holder.dataset.filled) return;
+  holder.dataset.filled = "1";
+  let windows = [];
+  try {
+    windows = await api("/api/date-windows");
+  } catch (_) { return; }
+  windows.forEach((w) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "btn";
+    button.dataset.window = w.name;
+    button.textContent = w.label;
+    button.onclick = () => applyFilter({ date_window: w.name });
+    holder.appendChild(button);
+  });
+}
+
+function showDateWindow(active) {
+  document.querySelectorAll("#f-windows [data-window]").forEach((button) => {
+    const on = button.dataset.window === (active || "all");
+    button.classList.toggle("is-on", on);
+    button.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+$("#f-reset").onclick = () => applyFilter({ reset: true });
+$("#only-selected").addEventListener("change", loadLibrary);
+
+/* The panel's own contents: the folders, tags and places that exist. */
+async function loadFilterOptions() {
+  if (filterKnown) return;
+  filterKnown = true;
+  const body = await api("/api/filters");
+  const fill = (selector, rows, asOption) => {
+    const target = $(selector);
+    rows.forEach((row) => {
+      const option = document.createElement("option");
+      option.value = row.name;
+      if (asOption) option.textContent = `${row.name} (${fmt(row.count)})`;
+      target.appendChild(option);
+    });
+  };
+  loadDateWindows();
+  fill("#f-folder", body.folders, true);
+  fill("#f-tag-list", body.tags, false);
+  fill("#f-place-list", body.locations, false);
+  showFilter(body.filters);
+}
+
+/* Filters can also be changed from Home Assistant, a key press or another
+   browser, so the panel follows the state document rather than only its own
+   last edit.  A box being typed into is left alone. */
+function showFilter(f) {
+  if (!f) return;
+  const set = (selector, value) => {
+    const el = $(selector);
+    if (el && document.activeElement !== el) el.value = value ?? "";
+  };
+  set("#f-folder", f.folder_choice === "(other)" ? "" : f.subfolder);
+  set("#f-tags", f.tags_text);
+  set("#f-place", f.location_contains);
+  set("#f-from", f.date_from_text);
+  set("#f-to", f.date_to_text);
+  const all = $("#f-tags-all");
+  if (all && document.activeElement !== all) all.checked = !!f.tags_match_all;
+  showDateWindow(f.date_window);
+  $("#filter").classList.toggle("is-active", !!f.active);
+}
+
+/* -------------------------------------------------------------- library */
+let libraryTimer = null;
+$("#search").addEventListener("input", () => {
+  clearTimeout(libraryTimer);
+  libraryTimer = setTimeout(loadLibrary, 250);
+});
+$("#folder").addEventListener("change", loadLibrary);
+
+async function loadLibrary() {
+  loadFilterOptions();
+  const q = $("#search").value.trim();
+  const folder = $("#folder").value;
+  const selected = $("#only-selected").checked ? "&selected=1" : "";
+  let photos = await api(
+    `/api/library/photos?limit=120&q=${encodeURIComponent(q)}${selected}`);
+  if (folder) photos = photos.filter((p) => p.folder === folder);
+  const grid = $("#grid");
+  grid.innerHTML = "";
+  $("#grid-empty").hidden = photos.length > 0;
+  for (const p of photos) {
+    const card = document.createElement("figure");
+    card.className = "card";
+    card.title = p.path;
+    card.innerHTML =
+      `<img loading="lazy" src="${thumbUrl(p)}" alt="">` +
+      (p.is_video ? `<span class="badge">video</span>` : "") +
+      `<figcaption>${escapeHtml(p.title || p.basename)}</figcaption>`;
+    card.querySelector("img").onload = (e) => e.target.classList.add("ready");
+    card.onclick = () => send("jump", { id: p.id });
+    grid.appendChild(card);
+  }
+  if ($("#folder").options.length <= 1) {
+    const folders = await api("/api/library/folders");
+    folders.forEach((f) => {
+      const opt = document.createElement("option");
+      opt.value = f.path;
+      opt.textContent = `${f.path.split("/").slice(-2).join("/")} (${f.count})`;
+      $("#folder").appendChild(opt);
+    });
+  }
+}
+
+/* -------------------------------------------------------------- removed */
+/* Removing moves a picture aside and writes a line about it; this page reads
+   those lines back, which is the whole point — a folder of loose JPEGs cannot
+   tell you why any of them is there.  Emptying the trash is the one thing here
+   that does delete, and it deletes the file only: the line stays, marked, so
+   the answer to "what happened to that photograph?" outlives the JPEG. */
+let removedTimer = null;
+$("#removed-search").addEventListener("input", () => {
+  clearTimeout(removedTimer);
+  removedTimer = setTimeout(loadRemoved, 250);
+});
+$("#removed-restored").addEventListener("change", loadRemoved);
+$("#removed-purged").addEventListener("change", loadRemoved);
+$("#trash-empty").addEventListener("click", emptyTrash);
+
+async function loadRemoved() {
+  const withRestored = $("#removed-restored").checked;
+  const withPurged = $("#removed-purged").checked;
+  const query = $("#removed-search").value.trim().toLowerCase();
+  let rows = await api(
+    `/api/removed?include_restored=${withRestored}&include_purged=${withPurged}`);
+  if (query) {
+    rows = rows.filter((r) =>
+      [r.basename, r.title, r.caption, r.location, r.folder, (r.tags || []).join(" ")]
+        .join(" ").toLowerCase().includes(query));
+  }
+  /* The button says how much it would delete, and is off when that is
+     nothing — a destructive button that does nothing when pressed teaches
+     people to press destructive buttons. */
+  const summary = await api("/api/removed/summary");
+  showCameBack(summary.came_back || 0);
+  const waiting = summary.count || 0;
+  const button = $("#trash-empty");
+  button.disabled = waiting === 0;
+  button.textContent = waiting
+    ? `Empty the trash (${fmt(waiting)})`
+    : "The trash is empty";
+
+  const list = $("#removed-list");
+  list.innerHTML = "";
+  $("#removed-empty").hidden = rows.length > 0;
+  $("#removed-empty").textContent = query
+    ? "Nothing removed matches that."
+    : "Nothing has been removed.";
+  for (const r of rows) list.appendChild(removalRow(r));
+}
+
+/* A Unix timestamp as the ISO string when_text() reads.  The journal speaks
+   ISO, the held-out list speaks seconds; the page should not care. */
+function isoOf(stamp) {
+  try {
+    return new Date(stamp * 1000).toISOString();
+  } catch {
+    return "";
+  }
+}
+
+/* The count of removed pictures that are back on the disk, on the tab itself
+   and above the list.  Zero hides both: a badge that is always there stops
+   being read. */
+function showCameBack(n) {
+  const badge = $("#removed-badge");
+  if (badge) {
+    badge.hidden = !n;
+    badge.textContent = n || "";
+  }
+  const note = $("#came-back-note");
+  if (note) {
+    note.hidden = !n;
+    note.textContent = n
+      ? `${n} removed picture${n === 1 ? " is" : "s are"} on the disk again. `
+        + "They are held out of the slideshow until you say otherwise — "
+        + "a folder that syncs both ways is the usual reason."
+      : "";
+  }
+}
+
+function removalRow(r) {
+  const row = document.createElement("article");
+  row.className = "removal" + (r.restored_at ? " is-restored" : "")
+    + (r.purged_at ? " is-purged" : "");
+
+  const shot = r.on_disk
+    ? `<span class="shot"><img loading="lazy" alt=""
+         src="/api/removed/${encodeURIComponent(r.stored_as)}/thumb?v=${
+           Math.round(r.removed_at || 0)}"></span>`
+    : `<span class="shot"><span class="gone">${
+         r.purged_at ? "deleted" : "file gone"}</span></span>`;
+
+  /* What it was, then when it went, then where it belongs. Tags and place are
+     the two that make a picture recognisable months later, so they come before
+     the technical detail. */
+  const said = [r.title, r.location, (r.tags || []).join(", ")].filter(Boolean).join(" · ");
+  const when = r.removed_iso ? when_text(r.removed_iso) : "";
+  const by = r.source ? ` from the ${sourceName(r.source)}` : "";
+  const taken = r.taken_iso ? `taken ${r.taken_iso.slice(0, 10)}` : "date unknown";
+
+  row.innerHTML =
+    shot +
+    `<div class="what">` +
+      `<strong>${escapeHtml(r.title || r.basename)}</strong>` +
+      `<div class="line">${escapeHtml(said || taken)}${
+        said ? ` · ${escapeHtml(taken)}` : ""}${r.is_video ? " · video" : ""}</div>` +
+      `<div class="line">Removed ${escapeHtml(when)}${escapeHtml(by)}</div>` +
+      `<div class="line from" title="${escapeHtml(r.original_path)}">${
+        escapeHtml(r.original_path)}</div>` +
+      (r.restored_at
+        ? `<div class="line back">Put back ${escapeHtml(when_text(r.restored_iso))}${
+            r.restored_to !== r.original_path && r.restored_to
+              ? ` as ${escapeHtml(r.restored_to.split("/").pop())}`
+              : ""}</div>`
+        : "") +
+      (r.purged_at
+        ? `<div class="line for-good">File deleted for good ${
+            escapeHtml(when_text(r.purged_iso))} — this note is what is left</div>`
+        : "") +
+      /* The line that explains a picture you removed and keep not seeing.
+         Without it, a two-way sync that re-copies the file every time looks
+         exactly like the frame having quietly ignored you.  Only when it has
+         actually happened: every removal is held out, so saying so on every
+         row is a sentence the eye learns to skip, and it drowns the one row
+         where something really did come back.  The rule itself is stated once,
+         at the top of the tab. */
+      (r.came_back
+        ? `<div class="line came-back">Turned up again${
+            r.seen_at ? ` ${escapeHtml(when_text(isoOf(r.seen_at)))}` : ""} at <span
+            class="from">${escapeHtml(r.seen_path)}</span> — still held out${
+            r.seen_count > 1 ? ` (${r.seen_count}×)` : ""}</div>`
+        : "") +
+    `</div>` +
+    `<div class="actions"></div>`;
+
+  const img = row.querySelector("img");
+  if (img) img.onload = (e) => e.target.classList.add("ready");
+
+  if (!r.restored_at && !r.purged_at) {
+    const forGood = document.createElement("button");
+    forGood.className = "btn btn-danger";
+    forGood.textContent = "Delete for good";
+    forGood.title = `Delete ${r.stored_as} from the disk. The note stays.`;
+    forGood.onclick = async () => {
+      if (!confirm(
+        `Delete ${r.basename} from the disk for good?\n\n` +
+        "It cannot be put back afterwards. The journal keeps what it was, " +
+        "when it went and where it came from.")) return;
+      forGood.disabled = true;
+      forGood.textContent = "Deleting…";
+      try {
+        await api(`/api/removed/${encodeURIComponent(r.stored_as)}/purge`,
+                  { method: "POST" });
+      } catch (err) {
+        alert(`Could not delete it: ${err.message}`);
+      }
+      /* The stats row and its Removed tile redraw themselves: the frame
+         pushes a new state document because the count changed. */
+      loadRemoved();
+    };
+    row.querySelector(".actions").appendChild(forGood);
+  }
+
+  /* The only thing that lets a removed picture back into the playlist -- and
+     offered only on a row where it changes something, which means a row whose
+     file has turned up on the disk again.  It used to sit on every held row,
+     where it read as a second, quieter "Put it back" and did nothing visible
+     when pressed: the file was still in the trash, and the trash is not
+     indexed.  Two buttons that sound alike and do different things is what
+     made this tab hard to read.  For a picture still in the trash, "Put it
+     back" is the whole answer -- it releases the hold as well. */
+  if (r.came_back) {
+    const allow = document.createElement("button");
+    allow.className = "btn";
+    allow.textContent = "Stop holding it out";
+    allow.title = `Let ${r.basename} into the slideshow again. The copy at `
+      + `${r.seen_path} is on the disk, so it is shown from now on.`;
+    allow.onclick = async () => {
+      allow.disabled = true;
+      allow.textContent = "Releasing…";
+      try {
+        await api(`/api/removed/${encodeURIComponent(r.stored_as)}/allow`,
+                  { method: "POST" });
+      } catch (err) {
+        alert(`Could not release it: ${err.message}`);
+      }
+      loadRemoved();
+    };
+    row.querySelector(".actions").appendChild(allow);
+  }
+
+  if (!r.restored_at && !r.purged_at && r.on_disk) {
+    const button = document.createElement("button");
+    button.className = "btn";
+    button.textContent = "Put it back";
+    button.title = `Move it back to ${r.original_path}`;
+    button.onclick = async () => {
+      button.disabled = true;
+      button.textContent = "Putting back…";
+      try {
+        const res = await api(
+          `/api/removed/${encodeURIComponent(r.stored_as)}/restore`,
+          { method: "POST" });
+        /* It can land under a different name if something has taken the old
+           one since; saying so beats a silent surprise in the folder. */
+        if (res.moved) alert(`The original name was taken, so it went back as\n${res.path}`);
+      } catch (err) {
+        alert(`Could not put it back: ${err.message}`);
+      }
+      loadRemoved();
+    };
+    row.querySelector(".actions").appendChild(button);
+  }
+  return row;
+}
+
+/* Two sentences and a count before anything is unlinked.  The second one is
+   the one that matters: the pictures go, the record of them does not. */
+async function emptyTrash() {
+  const summary = await api("/api/removed/summary");
+  const waiting = summary.count || 0;
+  if (!waiting) return;
+  if (!confirm(
+    `Delete ${waiting} picture${waiting === 1 ? "" : "s"} from the disk for good?\n\n` +
+    "They cannot be put back afterwards. The journal keeps every line: what " +
+    "each one was, when it went and where it came from.")) return;
+  const button = $("#trash-empty");
+  button.disabled = true;
+  button.textContent = "Emptying…";
+  try {
+    const res = await api("/api/removed/empty", { method: "POST" });
+    const parts = [`${fmt(res.deleted)} deleted`];
+    if (res.freed) parts.push(`${bytes(res.freed)} freed`);
+    if (res.missing) parts.push(`${fmt(res.missing)} already gone`);
+    if (res.left_alone) {
+      parts.push(`${fmt(res.left_alone)} file${res.left_alone === 1 ? "" : "s"} ` +
+                 "the frame did not put there left alone");
+    }
+    const failed = Object.keys(res.failed || {}).length;
+    if (failed) parts.push(`${fmt(failed)} could not be deleted`);
+    alert(`Trash emptied: ${parts.join(", ")}.`);
+  } catch (err) {
+    alert(`Could not empty the trash: ${err.message}`);
+  }
+  loadRemoved();
+}
+
+function sourceName(source) {
+  return { http: "web page", mqtt: "Home Assistant", keyboard: "keyboard",
+           gpio: "button", touch: "screen", internal: "frame" }[source] || source;
+}
+
+/* "Yesterday at 14:03" beats an ISO timestamp for the question actually being
+   asked, which is "was that me, last week?" */
+function when_text(iso) {
+  if (!iso) return "";
+  const then = new Date(iso);
+  if (isNaN(then)) return iso;
+  /* Calendar days, not 24-hour blocks.  Dividing the elapsed milliseconds
+     called yesterday evening "today at 19:24" for the whole of the following
+     morning -- the small lie that makes a journal useless, because the one
+     thing a reader wants from it is which day a thing happened on. */
+  const midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+  const thenDay = new Date(then);
+  thenDay.setHours(0, 0, 0, 0);
+  const days = Math.round((midnight - thenDay) / 86400000);
+  const clock = then.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (days <= 0) return `today at ${clock}`;
+  if (days === 1) return `yesterday at ${clock}`;
+  if (days < 7) return `${days} days ago at ${clock}`;
+  return then.toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+}
+
+/* ------------------------------------------------------------- settings */
+/* The whole page is generated from /api/config/schema, which is generated from
+   the config dataclasses.  A hand-written list here is how a settings page ends
+   up missing exactly the settings nobody thought about. */
+
+let SCHEMA = null;
+let onlySection = "";        // "" shows every section in the full list
+let openJob = null;          // the job whose sheet is on screen, if any
+
+async function loadSettings() {
+  SCHEMA = await api("/api/config/schema");
+  drawJobs();
+  // Only when it is on screen: drawing the full list wires up every control on
+  // it, and the address-tiers editor asks the frame for a preview as it does.
+  if (!$("#settings-all").hidden) drawSettings();
+  if (openJob) drawSheet(openJob);   // a sheet left open follows the new values
+}
+
+/* Every field of every section, by key: the jobs name settings, the sections
+   own them, and this is what turns one into the other. */
+function fieldsByKey() {
+  return Object.fromEntries(
+    SCHEMA.sections.flatMap((s) => s.fields.map((f) => [f.key, f])));
+}
+
+function settingCount() {
+  return SCHEMA.sections.reduce((n, s) => n + s.fields.length, 0);
+}
+
+/* ---- the front door ------------------------------------------------------
+   Nine cards, each a job someone came here to do, each saying what the frame
+   is doing about it now.  The sentences are written by the frame (uischema),
+   not here: one description of what `fit: auto` currently does, shared with
+   the reference, rather than two that can disagree. */
+function drawJobs() {
+  const grid = $("#jobs");
+  grid.innerHTML = (SCHEMA.jobs || []).map((job) => `
+    <button class="job" type="button" data-job="${escapeHtml(job.name)}">
+      <span class="job-kicker">${escapeHtml(job.kicker)}</span>
+      <span class="job-title">${escapeHtml(job.title)}</span>
+      <span class="job-state">${escapeHtml(job.state)}</span>
+      <span class="job-go">Adjust →</span>
+    </button>`).join("");
+  grid.querySelectorAll(".job").forEach((b) => {
+    b.onclick = () => openSheet(b.dataset.job);
+  });
+
+  /* Whatever no card claims gets a link of its own, worked out rather than
+     listed: add a section to the config and it turns up here by itself. */
+  const claimed = new Set((SCHEMA.jobs || []).map((j) => j.section));
+  const rare = [`<button class="linkish" type="button" data-all="">` +
+                `All ${settingCount()} settings</button>`]
+    .concat(SCHEMA.sections.filter((s) => !claimed.has(s.name)).map((s) =>
+      `<button class="linkish" type="button" data-all="${escapeHtml(s.name)}">` +
+      `${escapeHtml(s.label)}</button>`));
+  const strip = $("#rare-links");
+  strip.innerHTML = rare.join(" ");
+  strip.querySelectorAll("[data-all]").forEach((b) => {
+    b.onclick = () => showAll(b.dataset.all);
+  });
+}
+
+function showJobs() {
+  onlySection = "";
+  $("#settings-front").hidden = false;
+  $("#front-head").hidden = false;
+  $("#settings-all").hidden = true;
+  $("#all-head").hidden = true;
+  $("#settings-advanced-label").hidden = true;
+}
+
+function showAll(section) {
+  onlySection = section || "";
+  $("#settings-front").hidden = true;
+  $("#front-head").hidden = true;
+  $("#settings-all").hidden = false;
+  $("#all-head").hidden = false;
+  $("#settings-advanced-label").hidden = false;
+  const one = SCHEMA.sections.find((s) => s.name === onlySection);
+  $("#all-title").textContent = one ? one.label : `All ${settingCount()} settings`;
+  $("#all-lede").textContent = one ? one.prose
+    : "Generated from the frame's own configuration, so nothing can be missing " +
+      "from it. Grouped the way the config file is.";
+  drawSettings();
+  window.scrollTo({ top: 0 });
+}
+
+/* ---- the full list ------------------------------------------------------
+   The whole schema, or one section of it, or whatever matches the search box.
+   This is the page the front door is standing in front of, not a replacement
+   for it: every setting is still here. */
+function drawSettings() {
+  const form = $("#settings");
+  const query = ($("#settings-search")?.value || "").trim().toLowerCase();
+  const showAdvanced = !!$("#settings-advanced")?.checked;
+  form.innerHTML = "";
+  let shown = 0;
+
+  for (const section of SCHEMA.sections) {
+    if (onlySection && section.name !== onlySection) continue;
+    const visible = section.fields.filter((f) => {
+      if (f.advanced && !showAdvanced && !query) return false;
+      if (!query) return true;
+      return (f.label + " " + f.key + " " + f.note).toLowerCase().includes(query);
+    });
+    if (!visible.length) continue;
+    shown += visible.length;
+
+    const block = document.createElement("section");
+    block.className = "settings-group";
+    // With one section on screen the page head has already named it; a second
+    // identical heading under it is furniture.
+    block.innerHTML = (onlySection ? "" :
+                       `<h2>${escapeHtml(section.label)}</h2>` +
+                       `<p class="muted">${escapeHtml(section.prose)}</p>`) +
+                      `<div class="form"></div>`;
+    const grid = block.querySelector(".form");
+    for (const f of visible) grid.appendChild(fieldControl(f));
+    form.appendChild(block);
+  }
+  if (!shown) {
+    form.innerHTML = `<p class="empty">Nothing matches “${escapeHtml(query)}”.</p>`;
+  }
+  form.querySelectorAll("[data-key]").forEach(wireControl);
+  form.querySelectorAll("[data-pick-list]").forEach(wirePickList);
+  form.querySelectorAll("[data-tiers]").forEach(wireTiers);
+}
+
+/* ---- one job's sheet ----------------------------------------------------
+   The same controls as the full list, just fewer of them.  There is no Cancel
+   here on purpose: every control applies to the frame as you leave it, the way
+   the rest of this page has always worked, and the only thing left to decide
+   is whether it also goes into the config file. */
+const sheet = () => $("#sheet-backdrop");
+
+function openSheet(name) {
+  openJob = name;
+  drawSheet(name);
+  sheet().setAttribute("data-open", "");
+}
+
+function drawSheet(name) {
+  const job = (SCHEMA.jobs || []).find((j) => j.name === name);
+  if (!job) return closeSheet();
+  const byKey = fieldsByKey();
+  $("#sheet-kicker").textContent = job.kicker;
+  $("#sheet-title").textContent = job.title;
+  $("#sheet-state").textContent = job.state;
+  drawSheetExtra(job);
+
+  const form = $("#sheet-form");
+  form.innerHTML = "";
+  for (const key of job.fields) {
+    const field = byKey[key];
+    if (field) form.appendChild(fieldControl(field));
+  }
+  form.querySelectorAll("[data-key]").forEach(wireControl);
+  form.querySelectorAll("[data-pick-list]").forEach(wirePickList);
+  form.querySelectorAll("[data-tiers]").forEach(wireTiers);
+
+  // What this job leaves behind in its own section, said as a number so it is
+  // clear the card is a shortcut and not the whole truth.
+  const section = SCHEMA.sections.find((s) => s.name === job.section);
+  const here = job.fields.filter((k) => k.startsWith(`${job.section}.`)).length;
+  const rest = section ? section.fields.length - here : 0;
+  const link = $("#sheet-rest");
+  link.hidden = rest <= 0;
+  if (rest > 0) {
+    link.textContent = `Everything else in ${section.label}: ` +
+      `${rest} more setting${rest === 1 ? "" : "s"} →`;
+    link.onclick = (e) => { e.preventDefault(); closeSheet(); showAll(job.section); };
+  }
+  $("#sheet-note").textContent =
+    "Changes reach the frame as you make them; this writes them into the file.";
+}
+
+async function closeSheet() {
+  if (!openJob) return;
+  openJob = null;
+  stopSyncPolling();
+  sheet().removeAttribute("data-open");
+  // The cards summarise the configuration, so they are stale the moment
+  // anything in the sheet changed: ask the frame again rather than guessing.
+  try { await loadSettings(); } catch (err) { /* the frame is busy or down */ }
+}
+
+sheet().addEventListener("click", (e) => { if (e.target === sheet()) closeSheet(); });
+$("#sheet-close").onclick = () => closeSheet();
+$("#sheet-save").onclick = async () => {
+  await api("/api/config?persist=true", { method: "PATCH", body: "{}" });
+  $("#sheet-note").textContent = "Saved to the config file.";
+  $("#saved").textContent = "Saved to the config file.";
+};
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheet(); });
+$("#settings-back").onclick = () => showJobs();
+
+
+/* ---- Syncthing ----------------------------------------------------------
+   The one card that is about another program. Settings alone cannot answer
+   the questions somebody has here — is it installed, is it running, who is it
+   paired with, what is it doing right now — so the card carries a panel that
+   asks the frame, and the frame asks Syncthing.
+
+   Everything root-shaped (installing it, running it at boot) goes through the
+   frame's /api/sync/switch, which is the same path as the switch below it;
+   pairing and the folder go through Syncthing's own API on the frame. This
+   page never pretends to be Syncthing's interface — it links to it. */
+let syncTimer = null;
+
+function stopSyncPolling() {
+  if (syncTimer) clearInterval(syncTimer);
+  syncTimer = null;
+}
+
+function drawSheetExtra(job) {
+  const box = $("#sheet-extra");
+  stopSyncPolling();
+  if (!job || job.name !== "sync") {
+    box.hidden = true;
+    box.innerHTML = "";
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML = `<div class="panel"><p class="muted">Asking Syncthing…</p></div>`;
+  refreshSync();
+  // While something is being installed the answer changes underneath us, so
+  // the panel keeps asking for as long as it is on screen.
+  syncTimer = setInterval(refreshSync, 4000);
+}
+
+async function refreshSync() {
+  if (openJob !== "sync") return stopSyncPolling();
+  try {
+    drawSync(await api("/api/sync"));
+  } catch (err) {
+    $("#sheet-extra").innerHTML =
+      `<div class="panel"><p class="muted">The frame could not be asked about ` +
+      `Syncthing just now.</p></div>`;
+  }
+}
+
+function syncGuiUrl(s) {
+  return `http://${location.hostname}:${s.gui_port}/`;
+}
+
+function drawSync(s) {
+  const box = $("#sheet-extra");
+  const rows = [];
+
+  if (s.busy) {
+    rows.push(`<p><strong>Working on it…</strong></p>
+      <p class="muted">Installing Syncthing and starting it. On a Pi this is a
+      minute or two; this panel keeps itself up to date.</p>`);
+  } else if (!s.installed) {
+    rows.push(`<p><strong>Syncthing is not installed on this frame.</strong></p>
+      <p class="muted">Switching it on installs it, starts it with the Pi and
+      offers ${escapeHtml(s.folder_path)} to your other machines.</p>
+      <p><button class="btn btn-primary" data-sync="on" type="button">Install and switch on</button></p>`);
+  } else if (!s.running) {
+    rows.push(`<p><strong>Installed, not running.</strong></p>
+      <p><button class="btn btn-primary" data-sync="on" type="button">Switch on</button></p>`);
+  } else {
+    const folder = s.folder || null;
+    rows.push(`<p><strong>Running${s.version ? " · " + escapeHtml(s.version) : ""}</strong>
+      ${folder ? `· ${fmt(folder.files)} files, ${bytes(folder.bytes)}
+        ${folder.need_bytes ? `· ${bytes(folder.need_bytes)} still to come` : "· up to date"}`
+        : "· the frame's folder is not set up yet"}</p>`);
+    if (!folder) {
+      rows.push(`<p><button class="btn btn-primary" data-sync="folder" type="button">
+        Keep ${escapeHtml(s.folder_path)} in step</button></p>`);
+    }
+    if (s.device_id) {
+      rows.push(`<p class="sync-id"><span class="muted">This frame is</span>
+        <code>${escapeHtml(s.device_id)}</code>
+        <button class="btn" data-sync="copy" type="button">Copy</button></p>`);
+    }
+    // The actions are always here; only the link to Syncthing's own page
+    // depends on that page being reachable from anywhere but the frame.
+    rows.push(`<p>${s.gui_local_only ? "" :
+      `<a class="btn" href="${syncGuiUrl(s)}" target="_blank"
+          rel="noopener">Open Syncthing →</a>`}
+      <button class="btn" data-sync="folder" type="button">Re-apply the folder</button>
+      <button class="btn" data-sync="off" type="button">Switch off</button></p>`);
+    if (s.gui_local_only) {
+      rows.push(`<p class="muted">Syncthing's own page is only reachable on the
+        frame itself. Turn on “Syncthing’s own page on the network” below to
+        open it from here.</p>`);
+    }
+
+    if (s.pending && s.pending.length) {
+      rows.push(`<p class="sync-head">Asking to pair</p>` + s.pending.map((d) =>
+        `<p class="sync-row"><strong>${escapeHtml(d.name || d.device_id.slice(0, 7))}</strong>
+         <span class="muted">${escapeHtml(d.address || "")}</span>
+         <button class="btn btn-primary" data-sync="accept"
+           data-id="${escapeHtml(d.device_id)}"
+           data-name="${escapeHtml(d.name || "")}" type="button">Pair and share</button></p>`).join(""));
+    }
+    if (s.devices && s.devices.length) {
+      rows.push(`<p class="sync-head">Paired with</p>` + s.devices.map((d) =>
+        `<p class="sync-row"><strong>${escapeHtml(d.name)}</strong>
+         <span class="muted">${d.connected ? "connected" : "not connected now"}${
+           d.shares_the_pictures ? " · has the pictures" : " · not sharing the pictures"}</span>
+         <button class="btn btn-danger" data-sync="forget"
+           data-id="${escapeHtml(d.device_id)}" type="button">Forget</button></p>`).join(""));
+    }
+    rows.push(`<p class="sync-head">Add a machine by its id</p>
+      <p class="sync-row">
+        <input id="sync-id" type="text" autocomplete="off" spellcheck="false"
+               placeholder="ABCDEFG-HIJKLMN-…">
+        <input id="sync-name" type="text" autocomplete="off" placeholder="name (optional)">
+        <button class="btn" data-sync="add" type="button">Add</button></p>
+      <p class="muted">Syncthing shows the id under Actions → Show ID on the
+        other machine. Once it is added here, accept the folder there.</p>`);
+  }
+
+  if (s.error) {
+    rows.push(`<p class="sync-error">${escapeHtml(s.error)}</p>`);
+  }
+  box.innerHTML = `<div class="panel">${rows.join("")}</div>`;
+  box.querySelectorAll("[data-sync]").forEach((el) => {
+    el.onclick = () => syncAction(el);
+  });
+}
+
+async function syncAction(el) {
+  const what = el.dataset.sync;
+  if (what === "copy") {
+    const id = el.closest(".sync-id")?.querySelector("code")?.textContent || "";
+    try { await navigator.clipboard.writeText(id); el.textContent = "Copied"; }
+    catch (err) { el.textContent = "Select it by hand"; }
+    return;
+  }
+  if (what === "forget" &&
+      !confirm("Stop syncing with this machine? Nothing is deleted.")) return;
+  const label = el.textContent;
+  el.disabled = true;
+  el.textContent = "Working…";
+  try {
+    if (what === "on" || what === "off") {
+      await api("/api/sync/switch", {
+        method: "POST", body: JSON.stringify({ on: what === "on" }) });
+    } else if (what === "folder") {
+      await api("/api/sync/folder", { method: "POST", body: "{}" });
+    } else if (what === "accept") {
+      await api("/api/sync/device", { method: "POST", body: JSON.stringify(
+        { device_id: el.dataset.id, name: el.dataset.name }) });
+    } else if (what === "add") {
+      await api("/api/sync/device", { method: "POST", body: JSON.stringify(
+        { device_id: $("#sync-id").value, name: $("#sync-name").value }) });
+    } else if (what === "forget") {
+      await api("/api/sync/device/remove", { method: "POST",
+        body: JSON.stringify({ device_id: el.dataset.id }) });
+    }
+  } catch (err) {
+    el.textContent = "That did not work";
+    setTimeout(() => { el.disabled = false; el.textContent = label; }, 2500);
+    return;
+  }
+  await refreshSync();
+  // The card behind the sheet summarises the settings, and switching
+  // Syncthing on changed one of them.
+  try { SCHEMA = await api("/api/config/schema"); drawJobs(); } catch (e) {}
+}
+
+function optionList(name) {
+  return (SCHEMA.options && SCHEMA.options[name]) || [];
+}
+
+/* Every interpolation below goes through escapeHtml, including the ones whose
+   values come from the config schema rather than from a photograph. Those
+   lists are hard-coded today, which makes this belt and braces rather than a
+   fix — but "safe because of where the data happens to come from" is exactly
+   the kind of safety that stops being true when a setting starts carrying a
+   folder name or a tag. */
+function fieldControl(f) {
+  const wrap = document.createElement("div");
+  wrap.className = "field";
+  const wide = ["pick", "pick-string", "json", "tiers"].includes(f.kind);
+  if (wide) wrap.classList.add("field-wide");
+
+  let control;
+  switch (f.kind) {
+    case "bool":
+      control = `<input type="checkbox" data-key="${escapeHtml(f.key)}" data-kind="bool"` +
+                `${f.value ? " checked" : ""}>`;
+      break;
+    case "int":
+    case "number":
+      control = `<input type="number" step="${f.kind === "int" ? 1 : "any"}" ` +
+                `data-key="${escapeHtml(f.key)}" data-kind="${f.kind}" ` +
+                `value="${escapeHtml(f.value ?? "")}">`;
+      break;
+    case "secret":
+      control = `<input type="password" data-key="${escapeHtml(f.key)}" data-kind="text" ` +
+                `value="" autocomplete="new-password" ` +
+                `placeholder="${f.is_set ? "set — type to replace" : "not set"}">`;
+      break;
+    case "select": {
+      const opts = f.choices
+        ? f.choices.map((c) => ({ name: String(c), label: String(c) }))
+        : optionList(f.options);
+      const current = String(f.value ?? "");
+      control = `<select data-key="${escapeHtml(f.key)}" data-kind="select">` +
+        opts.map((o) => `<option value="${escapeHtml(o.name)}"` +
+          `${o.name === current ? " selected" : ""}>${escapeHtml(o.label)}</option>`).join("") +
+        `</select>`;
+      break;
+    }
+    case "pick":
+      control = pickList(f.key, f.value || [], optionList(f.options), true, f.ordered);
+      break;
+    case "pick-string":
+      control = pickList(f.key, String(f.value || "").toLowerCase().split(/[\s,]+/)
+                                 .filter(Boolean), optionList(f.options), false, false);
+      break;
+    case "datalist": {
+      // A real dropdown of what is actually in the library, but still a text
+      // box: the setting matches any part of a path, so typing "2024" to catch
+      // every folder from that year has to keep working.
+      const id = `list-${f.key.replace(/\W/g, "-")}`;
+      const opts = optionList(f.options);
+      control = `<input type="text" list="${id}" data-key="${escapeHtml(f.key)}" ` +
+                `data-kind="text" value="${escapeHtml(f.value ?? "")}" ` +
+                `placeholder="${opts.length ? "any folder" : ""}">` +
+                `<datalist id="${id}">` +
+                opts.map((o) => `<option value="${escapeHtml(o.name)}">` +
+                                `${escapeHtml(o.label)}</option>`).join("") +
+                `</datalist>`;
+      break;
+    }
+    case "tiers":
+      control = tiersEditor(f);
+      break;
+    case "csv":
+      control = `<input type="text" data-key="${escapeHtml(f.key)}" data-kind="csv" ` +
+                `value="${escapeHtml((f.value || []).join(", "))}" ` +
+                `placeholder="comma separated">`;
+      break;
+    case "numbers":
+      control = `<input type="text" data-key="${escapeHtml(f.key)}" data-kind="numbers" ` +
+                `value="${escapeHtml((f.value || []).join(", "))}" ` +
+                `placeholder="${f.nullable ? "empty = automatic" : "comma separated"}">`;
+      break;
+    case "json":
+      control = `<textarea rows="${jsonRows(f.value)}" data-key="${escapeHtml(f.key)}" ` +
+                `data-kind="json" spellcheck="false">` +
+                `${escapeHtml(JSON.stringify(f.value ?? null, null, 1))}</textarea>`;
+      break;
+    default:
+      control = `<input type="text" data-key="${escapeHtml(f.key)}" data-kind="text" ` +
+                `value="${escapeHtml(f.value ?? "")}">`;
+  }
+
+  const badge = f.live ? "" : `<span class="badge-restart" ` +
+    `title="Saved now; the frame picks it up when it restarts">restart</span>`;
+  const note = `<div class="hint">${markdownish(f.note)}</div>`;
+  // A control nobody has met before needs its explanation before it, not
+  // under it: by the time you have read the tiers box you have already
+  // guessed wrong about what it wants.
+  const explainFirst = f.kind === "tiers";
+  wrap.innerHTML = `<label>${escapeHtml(f.label)}${badge}</label>` +
+                   (explainFirst ? note : "") + control +
+                   (explainFirst ? "" : note) +
+                   `<div class="hint key">${f.key}</div>`;
+  return wrap;
+}
+
+/* ---- address tiers -------------------------------------------------------
+   geo.key_order is a list of lists, which as raw JSON is unreadable and as a
+   row of checkboxes is wrong — the order inside a line is what does the work.
+   One line per tier, keys separated by commas, with a live preview of what
+   the current picture's own address would come out as. */
+function tiersEditor(f) {
+  const text = (f.value || []).map((tier) => (tier || []).join(", ")).join("\n");
+  const keys = optionList(f.options);
+  return `<div data-tiers data-key="${escapeHtml(f.key)}" data-kind="list">
+    <textarea rows="${Math.max(3, (f.value || []).length)}" spellcheck="false"
+              class="tiers-text">${escapeHtml(text)}</textarea>
+    <div class="tiers-preview">
+      <span class="tiers-out">…</span>
+      <span class="tiers-source muted"></span>
+    </div>
+    <details class="tiers-keys">
+      <summary>Keys you can use</summary>
+      <p class="muted">Click one to add it to the last line. Not every address
+        has every key — that is why a line lists alternatives.</p>
+      <div class="tiers-chips">${keys.map((k) =>
+        `<button type="button" data-add="${escapeHtml(k.name)}" title="${escapeHtml(k.label)}"
+                 class="${k.available ? "have" : ""}">${escapeHtml(k.name)}</button>`).join("")}</div>
+    </details>
+  </div>`;
+}
+
+function parseTiers(text) {
+  return text.split("\n")
+    .map((line) => line.split(",").map((k) => k.trim().toLowerCase()).filter(Boolean))
+    .filter((tier) => tier.length);
+}
+
+function wireTiers(box) {
+  const area = box.querySelector(".tiers-text");
+  const out = box.querySelector(".tiers-out");
+  const source = box.querySelector(".tiers-source");
+  let timer = null;
+
+  const preview = async () => {
+    try {
+      const res = await fetch("/api/geo/preview", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ detail: "custom", key_order: parseTiers(area.value) }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      out.textContent = data.text || "(nothing — none of these keys is in the address)";
+      source.textContent = `from ${data.source}`;
+      // Mark the keys this particular address actually has, so the chips teach
+      // rather than just list.
+      const have = new Set(data.available || []);
+      box.querySelectorAll("[data-add]").forEach((chip) =>
+        chip.classList.toggle("have", have.has(chip.dataset.add)));
+    } catch (err) { /* the frame is busy or down; the preview is optional */ }
+  };
+
+  const commit = () => {
+    const value = parseTiers(area.value);
+    send("set_config", { key: box.dataset.key, value });
+    $("#saved").textContent =
+      `${box.dataset.key} = ${value.length} tier${value.length === 1 ? "" : "s"}` +
+      "  (not yet written to the config file)";
+  };
+
+  area.oninput = () => {
+    clearTimeout(timer);
+    timer = setTimeout(preview, 250);
+  };
+  area.onchange = commit;
+  box.onclick = (e) => {
+    const chip = e.target.closest("[data-add]");
+    if (!chip) return;
+    const lines = area.value.split("\n");
+    const last = lines.length - 1;
+    lines[last] = lines[last].trim()
+      ? `${lines[last].replace(/,\s*$/, "")}, ${chip.dataset.add}`
+      : chip.dataset.add;
+    area.value = lines.join("\n");
+    commit();
+    preview();
+  };
+  preview();
+}
+
+function jsonRows(value) {
+  return Math.min(14, Math.max(3, JSON.stringify(value ?? null, null, 1).split("\n").length));
+}
+
+/* Only backticks and ** ** — the notes are ours, not user input, but they are
+   still escaped first so a stray < in a strftime example cannot inject. */
+function markdownish(text) {
+  return escapeHtml(text || "")
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+}
+
+function wireControl(el) {
+  if (el.dataset.kind === "list") return;          // handled by wirePickList
+  const commit = () => {
+    let value;
+    switch (el.dataset.kind) {
+      case "bool": value = el.checked; break;
+      case "int": value = Math.round(Number(el.value)); break;
+      case "number": value = Number(el.value); break;
+      case "csv":
+        value = el.value.split(",").map((s) => s.trim()).filter(Boolean);
+        break;
+      case "numbers": {
+        const parts = el.value.split(",").map((s) => s.trim()).filter(Boolean);
+        value = parts.length ? parts.map(Number) : null;
+        if (value && value.some((n) => Number.isNaN(n))) return note(el, "not a number");
+        break;
+      }
+      case "json":
+        try {
+          value = JSON.parse(el.value);
+        } catch (err) {
+          return note(el, `not valid JSON: ${err.message}`);
+        }
+        break;
+      default: value = el.value;
+    }
+    if (el.type === "password" && el.value === "") return;   // unchanged
+    el.classList.remove("bad");
+    send("set_config", { key: el.dataset.key, value });
+    $("#saved").textContent =
+      `${el.dataset.key} = ${el.type === "password" ? "••••••••" : JSON.stringify(value)}` +
+      "  (not yet written to the config file)";
+  };
+  el.onchange = commit;
+}
+
+function note(el, message) {
+  el.classList.add("bad");
+  $("#saved").textContent = `${el.dataset.key}: ${message} — not saved`;
+}
+
+/* ---- tick-and-reorder list ----------------------------------------------
+   Used for the caption elements, where order is the whole point ("Place ·
+   Date" and "Date · Place" are different captions), and for the mat styles
+   and transitions, where it is not: ticking several means "choose between
+   these".  `asArray` sends a JSON array; otherwise a space-separated string,
+   which is the form picframe used and the config still accepts. */
+function pickList(key, chosen, available, asArray, reorder) {
+  const known = (available.length ? available : chosen)
+    .map((f) => (typeof f === "string" ? { name: f, label: f } : f));
+  const byName = Object.fromEntries(known.map((f) => [f.name, f.label]));
+  const rows = [
+    ...chosen.filter((n) => n in byName).map((n) => ({ name: n, on: true })),
+    ...known.filter((f) => !chosen.includes(f.name)).map((f) => ({ name: f.name, on: false })),
+  ].map(({ name, on }) => `
+    <li data-name="${escapeHtml(name)}" class="${on ? "on" : ""}">
+      <label><input type="checkbox" ${on ? "checked" : ""}>
+        <span>${escapeHtml(byName[name])}</span></label>
+      ${reorder ? `<button type="button" data-move="-1" title="Move up">▲</button>
+      <button type="button" data-move="1" title="Move down">▼</button>` : ""}
+    </li>`).join("");
+  return `<ol class="caption-list" data-pick-list data-key="${escapeHtml(key)}" data-kind="list"
+              data-array="${asArray ? 1 : 0}"${reorder ? " data-ordered" : ""}>${rows}</ol>`;
+}
+
+function wirePickList(list) {
+  const asArray = list.dataset.array === "1";
+  const commit = () => {
+    const names = [...list.querySelectorAll("li")]
+      .filter((li) => li.querySelector("input").checked)
+      .map((li) => li.dataset.name);
+    // A mat style is a string, as picframe had it; the rest are real lists.
+    const value = asArray ? names : (names.join(" ") || "single");
+    send("set_config", { key: list.dataset.key, value });
+    $("#saved").textContent =
+      `${list.dataset.key} = ${asArray ? `[${names.join(", ")}]` : value}` +
+      "  (not yet written to the config file)";
+  };
+  list.onclick = (e) => {
+    const move = e.target.closest("[data-move]");
+    if (!move) return;
+    const li = move.closest("li");
+    const up = Number(move.dataset.move) < 0;
+    const sibling = up ? li.previousElementSibling : li.nextElementSibling;
+    if (!sibling) return;
+    up ? list.insertBefore(li, sibling) : list.insertBefore(sibling, li);
+    commit();
+  };
+  list.onchange = (e) => {
+    if (e.target.type !== "checkbox") return;
+    e.target.closest("li").classList.toggle("on", e.target.checked);
+    commit();
+  };
+}
+
+/* ------------------------------------------------------------------ theme */
+/* The choice lives in this browser, not in the frame's configuration: the
+   phone in a dark room and the laptop at the desk are looking at the same
+   frame and want different answers. */
+const themePicker = $("#theme");
+try {
+  themePicker.value = localStorage.getItem("picframe3-theme") || "auto";
+} catch (err) { themePicker.value = "auto"; }
+themePicker.onchange = () => {
+  const choice = themePicker.value;
+  if (choice === "auto") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = choice;
+  try { localStorage.setItem("picframe3-theme", choice); } catch (err) { /* private window */ }
+};
+
+/* Typing is a way into the full list, not a filter on the cards: a card is a
+   job, and half a job is nothing.  Emptying the box again puts the front door
+   back, unless a single section was chosen deliberately. */
+$("#settings-search").oninput = () => {
+  if (!SCHEMA) return;
+  const query = $("#settings-search").value.trim();
+  if (query && $("#settings-all").hidden) showAll("");
+  else if (!query && !onlySection) showJobs();
+  else drawSettings();
+};
+$("#settings-advanced").onchange = () => { if (SCHEMA) drawSettings(); };
+
+$("#save").onclick = async () => {
+  await api("/api/config?persist=true", { method: "PATCH", body: "{}" });
+  $("#saved").textContent = "Saved to the config file.";
+};
+$("#reload").onclick = async () => {
+  await send("reload");
+  await loadSettings();
+  $("#saved").textContent = "Reloaded from the config file.";
+};
+$("#restart").onclick = () => restartFrame();
+$("#restart-now").onclick = () => restartFrame();
+$("#shutdown").onclick = () => shutDownFrame();
+
+/* ------------------------------------------------------------------ restart
+   Several settings — the MQTT broker, the HTTP port, which folders are
+   indexed — can only be picked up by a fresh process.  Saving first is the
+   default, because a restart would otherwise throw away the very changes it
+   is being asked to apply. */
+let restarting = false;
+
+async function restartFrame() {
+  if (restarting) return;
+  const unsaved = state && state.unsaved_changes;
+  const question = unsaved
+    ? "Save the settings and restart the frame?\n\nThe picture goes dark for a few seconds."
+    : "Restart the frame?\n\nThe picture goes dark for a few seconds.";
+  if (!confirm(question)) return;
+
+  restarting = true;
+  for (const id of ["#restart", "#restart-now"]) {
+    $(id).disabled = true;
+    $(id).textContent = "Restarting…";
+  }
+  $("#saved").textContent = "Restarting the frame…";
+  try {
+    // The frame stops answering as soon as it acts on this, so a failed fetch
+    // here is the expected case, not an error.
+    await fetch("/api/restart?save=true", { method: "POST" });
+  } catch (err) { /* it went down mid-reply */ }
+  waitForTheFrame();
+}
+
+async function waitForTheFrame(attempt = 0) {
+  if (attempt > 60) {                     // two minutes
+    $("#saved").textContent =
+      "The frame has not come back. Check: journalctl -u picframe3@pi -n 40";
+    restarting = false;
+    $("#restart").disabled = false;
+    $("#restart").textContent = "Restart the frame";
+    $("#restart-now").disabled = false;
+    $("#restart-now").textContent = "Save & restart";
+    return;
+  }
+  await new Promise((done) => setTimeout(done, 2000));
+  try {
+    const res = await fetch("/api/health", { cache: "no-store" });
+    if (res.ok) return location.reload();
+  } catch (err) { /* still down */ }
+  $("#saved").textContent = `Restarting the frame… (${(attempt + 1) * 2}s)`;
+  waitForTheFrame(attempt + 1);
+}
+
+/* ----------------------------------------------------------------- shutdown
+   Not a restart with nothing after it: the Pi powers off and only the power
+   switch brings it back, which is why this one does not wait for the frame to
+   return and why it sits in the "rarely needed" strip rather than beside
+   Save. Saving first, as a restart does — the settings would otherwise go with
+   it. */
+async function shutDownFrame() {
+  const unsaved = state && state.unsaved_changes;
+  if (!confirm(
+    (unsaved ? "Save the settings and shut the frame down?\n\n"
+             : "Shut the frame down?\n\n") +
+    "The Pi powers off. Wait for the screen to go dark before pulling the " +
+    "plug — and the frame comes back only when the power is switched on again."
+  )) return;
+
+  const button = $("#shutdown");
+  button.disabled = true;
+  button.textContent = "Shutting down…";
+  $("#saved").textContent = "Shutting the frame down…";
+  try {
+    const res = await fetch("/api/shutdown?save=true", { method: "POST" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      $("#saved").textContent = body.detail || "The frame could not shut down.";
+      button.disabled = false;
+      button.textContent = "Shut the frame down";
+      return;
+    }
+  } catch (err) { /* it went down mid-reply, which is the point */ }
+  $("#saved").textContent =
+    "Powering off. Wait for the screen to go dark before pulling the plug.";
+}
+
+function renderRestartNotice() {
+  const notice = $("#restart-notice");
+  if (!state) return;
+  const pending = state.restart_required || [];
+  const unsaved = !!state.unsaved_changes;
+
+  /* The save bar is on screen at all times, so it is where "there is something
+     to save" belongs — a notice at the top of a page you have scrolled away
+     from is a notice nobody is looking at.  That leaves the notice the one
+     thing only it can say: which settings are waiting for a restart. */
+  for (const sel of [".save-bar", ".sheet-foot"]) {
+    const bar = document.querySelector(sel);
+    if (bar) bar.classList.toggle("is-clean", !unsaved);
+  }
+  $("#save-state").hidden = !unsaved;
+
+  if (!pending.length) { notice.hidden = true; return; }
+  notice.hidden = false;
+  $("#restart-headline").textContent = pending.length === 1
+    ? "One setting needs a restart"
+    : `${pending.length} settings need a restart`;
+  $("#restart-detail").textContent =
+    pending.join(", ") +
+    (unsaved ? " — these will be saved to the config file first." : "");
+  $("#restart-now").hidden = false;
+}
+
+/* --------------------------------------------------------------- utils */
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function fmt(n) { return (n ?? 0).toLocaleString(); }
+/* A size as somebody reads it: 940 MB, 12.4 GB — never 12884901888. */
+function bytes(n) {
+  n = Number(n || 0);
+  const units = ["bytes", "kB", "MB", "GB", "TB"];
+  let unit = 0;
+  while (n >= 1000 && unit < units.length - 1) { n /= 1000; unit += 1; }
+  return `${unit === 0 ? n : n.toFixed(n < 10 ? 1 : 0)} ${units[unit]}`;
+}
+function duration(sec) {
+  sec = Math.round(sec || 0);
+  const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}m`;
+  return `${m}m`;
+}

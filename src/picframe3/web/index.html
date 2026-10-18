@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f3f2f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#171514" media="(prefers-color-scheme: dark)">
+<title>Picture Frame</title>
+<script>
+  /* Stamped before the stylesheet paints, so the page never flashes the wrong
+     theme on its way to the right one.  Deliberately tiny and inline: a
+     separate file would be fetched after the first paint, which is the flash
+     this exists to prevent.  "auto" leaves no attribute, so the CSS media
+     query decides and keeps following the device if the user changes it. */
+  (function () {
+    var choice = "auto";
+    try { choice = localStorage.getItem("picframe3-theme") || "auto"; } catch (e) {}
+    if (choice === "light" || choice === "dark") {
+      document.documentElement.dataset.theme = choice;
+    }
+  })();
+</script>
+<link rel="stylesheet" href="style.css">
+<!-- Relative, like every other asset here: the interface is mounted at the
+     server root but is opened by IP, by hostname and by .local name alike. -->
+<link rel="icon" href="favicon.ico" sizes="32x32">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+</head>
+<body>
+<header class="bar">
+  <div class="brand">
+    <span class="dot" id="live"></span>
+    <strong>Picture&nbsp;Frame</strong>
+    <span class="muted" id="display-info"></span>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button class="tab is-active" data-view="now">Now playing</button>
+    <button class="tab" data-view="library">Library</button>
+    <button class="tab" data-view="removed">Removed<span id="removed-badge"
+            class="badge" hidden></span></button>
+    <button class="tab" data-view="settings">Settings</button>
+    <select id="theme" title="Light or dark" aria-label="Theme">
+      <option value="auto">Auto</option>
+      <option value="light">Light</option>
+      <option value="dark">Dark</option>
+    </select>
+  </nav>
+</header>
+
+<main>
+  <!-- ---------------------------------------------------------- Now -->
+  <section id="view-now" class="view is-active">
+    <div class="stage">
+      <img id="preview" alt="" hidden>
+      <div id="preview-empty" class="empty">No picture yet</div>
+      <div class="progress"><span id="progress-bar"></span></div>
+      <span id="live-badge" class="badge-live" hidden>live screen</span>
+    </div>
+
+    <div class="meta">
+      <span class="kicker">On the wall</span>
+      <h1 id="title">—</h1>
+      <p id="subtitle" class="muted"></p>
+      <ul id="exif" class="chips"></ul>
+    </div>
+
+    <div class="controls">
+      <button id="prev" class="btn" title="Previous (←)">‹ Prev</button>
+      <button id="pause" class="btn btn-primary">Pause</button>
+      <button id="next" class="btn" title="Next (→)">Next ›</button>
+      <button id="power" class="btn">Screen off</button>
+      <button id="caption" class="btn"
+              title="Write the date, place and title over the picture">Show caption</button>
+      <button id="shot" class="btn" title="Capture what is actually on the frame's screen">Screenshot</button>
+      <button id="del" class="btn btn-danger" title="Move this picture out of the library">Remove</button>
+    </div>
+
+    <div class="sliders">
+      <label>Brightness <output id="brightness-out">100%</output>
+        <input id="brightness" type="range" min="5" max="100" value="100">
+      </label>
+      <label>Seconds per picture <output id="interval-out">180</output>
+        <input id="interval" type="range" min="5" max="900" step="5" value="180">
+      </label>
+    </div>
+
+    <dl class="stats" id="stats"></dl>
+  </section>
+
+  <!-- ------------------------------------------------------ Library -->
+  <section id="view-library" class="view">
+    <!-- The filter is the frame, not the browser: everything here changes
+         what goes on the wall, which is why it sits above the grid and says
+         so in its heading. -->
+    <section class="filter" id="filter">
+      <div class="filter-head">
+        <span class="kicker">Filter</span>
+        <h2>What the frame is showing</h2>
+        <span class="pill" id="filter-count">—</span>
+      </div>
+      <div class="form">
+        <div class="field">
+          <label for="f-folder">Folder</label>
+          <select id="f-folder" data-filter="folder">
+            <option value="">All folders</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="f-tags">Tags</label>
+          <input id="f-tags" type="text" data-filter="tags" list="f-tag-list"
+                 placeholder="any tag" autocomplete="off">
+          <datalist id="f-tag-list"></datalist>
+          <label class="inline"><input id="f-tags-all" type="checkbox"
+                 data-filter="tags_match_all"> Match all of them</label>
+          <div class="hint">Several, separated by commas. Any one of them
+            counts unless you tick the box.</div>
+        </div>
+        <div class="field">
+          <label for="f-place">Place</label>
+          <input id="f-place" type="text" data-filter="location" list="f-place-list"
+                 placeholder="anywhere" autocomplete="off">
+          <datalist id="f-place-list"></datalist>
+          <div class="hint">Any part of a place name: <code>France</code>
+            catches every town in it.</div>
+        </div>
+        <div class="field">
+          <label for="f-from">Taken from</label>
+          <input id="f-from" type="date" data-filter="date_from">
+        </div>
+        <div class="field">
+          <label for="f-to">Taken until</label>
+          <input id="f-to" type="date" data-filter="date_to">
+        </div>
+      </div>
+      <!-- Dates as rules rather than as dates.  "Last 7 days" used to fill
+           the two boxes above with the dates it meant today, which froze the
+           filter on the day it was pressed; what is stored now is the rule,
+           and the frame works the dates out again every day. -->
+      <div class="filter-quick">
+        <span class="muted">Dates:</span>
+        <span id="f-windows" class="filter-windows"></span>
+        <button class="btn" id="f-reset" type="button">Show everything</button>
+      </div>
+    </section>
+
+    <div class="toolbar">
+      <input id="search" type="search" placeholder="Search titles, captions, tags, places…" autocomplete="off">
+      <select id="folder"><option value="">All folders</option></select>
+      <label class="inline"><input id="only-selected" type="checkbox">
+        Only the ones the frame is showing</label>
+      <button id="rescan" class="btn">Rescan</button>
+    </div>
+    <div id="grid" class="grid"></div>
+    <p id="grid-empty" class="empty" hidden>Nothing matches.</p>
+  </section>
+
+  <!-- ------------------------------------------------------ Removed -->
+  <section id="view-removed" class="view">
+    <div class="page-head">
+      <div>
+        <span class="kicker">Removed</span>
+        <h1>Nothing goes without a record</h1>
+        <p class="lede" id="removed-intro">
+          Every picture you remove is moved aside and written down here — when
+          it went, where it came from, and what it was. <em>Put it back</em> and
+          it returns to its own folder and to the slideshow. Leave it here and it
+          stays out, even if the file turns up again from a sync or a backup —
+          the row says so when that happens. Empty the trash to get the disk
+          space: the note stays either way.
+        </p>
+        <p class="lede warn" id="came-back-note" hidden></p>
+      </div>
+    </div>
+    <div class="toolbar">
+      <input id="removed-search" type="search" autocomplete="off"
+             placeholder="Search removed pictures…">
+      <label class="inline"><input id="removed-restored" type="checkbox">
+        Show ones I put back</label>
+      <label class="inline"><input id="removed-purged" type="checkbox">
+        Show ones I deleted for good</label>
+      <a id="removed-journal" class="btn" href="/api/removed/journal"
+         download="removals.jsonl">Download the journal</a>
+      <button id="trash-empty" class="btn btn-danger" type="button" disabled>
+        Empty the trash</button>
+    </div>
+    <div id="removed-list" class="removed"></div>
+    <p id="removed-empty" class="empty" hidden>Nothing has been removed.</p>
+  </section>
+
+  <!-- ----------------------------------------------------- Settings -->
+  <!-- Two ways in, one behind the other: nine jobs on the front, and the
+       whole generated list a click away for everything they leave out. -->
+  <section id="view-settings" class="view">
+    <div id="restart-notice" class="notice" hidden>
+      <div>
+        <strong id="restart-headline"></strong>
+        <p id="restart-detail" class="muted"></p>
+      </div>
+      <button id="restart-now" class="btn btn-primary" type="button">Save &amp; restart</button>
+    </div>
+
+    <!-- One head at a time, and the tools sit under whichever it is, directly
+         above what they act on. -->
+    <div class="page-head" id="front-head">
+      <div>
+        <h1>What would you like to change?</h1>
+        <p class="lede">Every card shows what the frame is doing now. Open one
+          and you get only the settings that job needs.</p>
+      </div>
+    </div>
+
+    <div class="page-head" id="all-head" hidden>
+      <div>
+        <button id="settings-back" class="linkish" type="button">← All the jobs</button>
+        <h1 id="all-title">All settings</h1>
+        <p class="lede" id="all-lede"></p>
+      </div>
+    </div>
+
+    <div class="settings-tools">
+      <span class="spacer"></span>
+      <input id="settings-search" type="search" autocomplete="off"
+             placeholder="Search every setting…">
+      <label class="inline" id="settings-advanced-label" hidden>
+        <input id="settings-advanced" type="checkbox"> Show advanced</label>
+    </div>
+
+    <div id="settings-front">
+      <div id="jobs" class="jobs"></div>
+      <nav class="rare">
+        <span class="rare-label">Rarely needed</span>
+        <span id="rare-links"></span>
+        <!-- Down here rather than in the save bar on purpose: it is the one
+             button nothing on the network can undo. -->
+        <button id="shutdown" class="linkish rare-danger" type="button"
+                title="Power the Pi off, so the plug can be pulled safely"
+                hidden>Shut the frame down</button>
+      </nav>
+    </div>
+
+    <div id="settings-all" hidden>
+      <form id="settings"></form>
+    </div>
+
+    <!-- Pinned to the foot of the window: a page you can scroll for a minute
+         should never make you scroll back to find the button that keeps what
+         you just changed. -->
+    <div class="save-bar is-clean">
+      <button id="save" class="btn btn-primary" type="button">Save to config file</button>
+      <button id="reload" class="btn" type="button">Reload from file</button>
+      <button id="restart" class="btn" type="button"
+              title="Stop the frame and start it again">Restart the frame</button>
+      <span class="unsaved" id="save-state" hidden>Not yet in the config file</span>
+      <span class="spacer"></span>
+      <pre id="saved" class="muted"></pre>
+    </div>
+  </section>
+</main>
+
+<!-- One sheet, filled from whichever job was opened. -->
+<div class="sheet-backdrop" id="sheet-backdrop">
+  <aside class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+    <div class="sheet-head">
+      <div>
+        <span class="kicker" id="sheet-kicker"></span>
+        <h2 id="sheet-title">—</h2>
+        <p id="sheet-state"></p>
+      </div>
+      <button class="btn sheet-close" id="sheet-close" type="button">Close</button>
+    </div>
+    <div class="sheet-body">
+      <!-- A job that is about another program rather than about a setting
+           fills this in: Syncthing's card says what Syncthing is actually
+           doing, and offers the two or three things a settings page can
+           usefully do about it. -->
+      <div id="sheet-extra" hidden></div>
+      <div class="form" id="sheet-form"></div>
+    </div>
+    <a class="sheet-rest linkish" id="sheet-rest" href="#"></a>
+    <div class="sheet-foot is-clean">
+      <button class="btn btn-primary" id="sheet-save" type="button">Save to config file</button>
+      <span class="spacer"></span>
+      <span class="muted note" id="sheet-note"></span>
+    </div>
+  </aside>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

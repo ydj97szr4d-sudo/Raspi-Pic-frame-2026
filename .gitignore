@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.db3
+*.db3-wal
+*.db3-shm
+transitions.png
+demo.png
+
+# Scratch space for agent/tooling output; never part of the project.
+Claude outputs/
