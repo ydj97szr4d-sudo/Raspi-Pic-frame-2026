@@ -880,7 +880,16 @@ class HttpServer:
             too_big = await _in_thread(_too_many_pixels, path, is_video)
             if too_big:
                 raise HTTPException(413, too_big)
-            data = await _in_thread(render_preview, path, is_video, (size, size), 82)
+            if is_video:
+                # Shared, serialised, short-TTL-cached path -- see
+                # _video_preview()'s docstring. This endpoint exists for
+                # something like a Home Assistant camera to poll on an
+                # interval, and without this a video playing on the frame
+                # meant a fresh decode pipeline fighting its OWN playback
+                # for the hardware decoder on every single poll.
+                data = await _video_preview(path, (size, size))
+            else:
+                data = await _in_thread(render_preview, path, is_video, (size, size), 82)
             if data is None:
                 raise HTTPException(415, "cannot render this file as a picture")
             return Response(data, media_type="image/jpeg", headers={
@@ -1255,7 +1264,54 @@ def _thumbnail(path: str, is_video: bool) -> bytes | None:
 #: frame itself is currently playing. This serialises them to one at a
 #: time, so a page full of video thumbnails costs some loading time, never
 #: a pile of pipelines fighting over hardware the frame also needs.
+#:
+#: /api/current shares this lock (see _video_preview()) for the same
+#: reason, and matters more: its own docstring says it exists for something
+#: like Home Assistant's Generic Camera to poll on an interval, and when the
+#: picture on the frame right now is a video, every single poll was calling
+#: render_preview() -- a fresh decode pipeline, every few seconds, for as
+#: long as that video plays -- fighting the video's OWN playback pipeline
+#: for the one hardware decoder the whole time. Confirmed directly: a
+#: live GST_DEBUG capture during ordinary (no gallery open) playback showed
+#: 60+ decoder instances opened in under five minutes, roughly one every
+#: 4-5 seconds, continuously -- that cadence, not a one-time burst, is
+#: what a camera-style poller looks like, not a person browsing thumbnails.
 _video_thumbnail_lock = asyncio.Semaphore(1)
+
+#: path -> (rendered_at, size, jpeg_bytes). Keyed loosely (no mtime check):
+#: this is a short-lived poll-deduplication cache for "the video currently
+#: playing", not a correctness-critical cache for a file that might change
+#: underneath it, and a few seconds of staleness here is irrelevant to what
+#: this is for. Unbounded only in the sense that nothing ever evicts an
+#: old path -- fine in practice, since there is only ever one "current"
+#: item, so this holds at most a small handful of entries across a poller
+#: moving between a few videos over time.
+_video_preview_cache: dict[tuple[str, int], tuple[float, bytes]] = {}
+_VIDEO_PREVIEW_TTL = 8.0  # seconds
+
+
+async def _video_preview(path: str, size: tuple[int, int], quality: int = 82) -> bytes | None:
+    """render_preview() for a video, shared by /api/current and the
+    library-thumbnail endpoint: serialised against the one hardware
+    decoder (see _video_thumbnail_lock above) and short-TTL cached so a
+    poller hitting /api/current every few seconds while a video plays
+    reuses one decoded frame instead of opening a fresh pipeline every
+    single time."""
+    from ..media.preview import render_preview
+
+    key = (path, size[0])
+    now = time.monotonic()
+    cached = _video_preview_cache.get(key)
+    if cached and now - cached[0] < _VIDEO_PREVIEW_TTL:
+        return cached[1]
+    async with _video_thumbnail_lock:
+        cached = _video_preview_cache.get(key)
+        if cached and now - cached[0] < _VIDEO_PREVIEW_TTL:
+            return cached[1]
+        data = await _in_thread(render_preview, path, True, size, quality)
+        if data is not None:
+            _video_preview_cache[key] = (time.monotonic(), data)
+        return data
 
 
 async def _thumbnail_response(path: str, is_video: bool, versioned: bool = False):
@@ -1271,8 +1327,7 @@ async def _thumbnail_response(path: str, is_video: bool, versioned: bool = False
     if too_big:
         raise HTTPException(413, too_big)
     if is_video:
-        async with _video_thumbnail_lock:
-            data = await _in_thread(_thumbnail, path, is_video)
+        data = await _video_preview(path, THUMB_SIZE)
     else:
         data = await _in_thread(_thumbnail, path, is_video)
     if data is None:
