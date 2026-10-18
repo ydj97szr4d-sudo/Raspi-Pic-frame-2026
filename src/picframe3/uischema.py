@@ -100,6 +100,7 @@ NOTES = {
     "slideshow.video_loop": "Repeat a short video until the picture interval is up, instead of moving on when it ends.",
     "slideshow.video_mute": "Videos are silent by default; a frame on a shelf that suddenly talks is startling.",
     "slideshow.video_max_seconds": "Cut every video off after this many seconds. 0 plays each one to the end, however long it is \u2014 a video is never cut short by the picture interval.",
+    "slideshow.video_engine": "`gstreamer` decodes into the frame's own renderer, so crossfades, Ken Burns and overlays keep working over video \u2014 but every frame costs a Python-side copy and a GL upload, which on some boards is slow enough to be visibly choppy regardless of resolution. `vlc` hands the whole screen to VLC's own direct-to-display output for the clip, which is smooth at any resolution but blanks out every overlay and transition for as long as the clip plays: no crossfade in or out, no clock or weather line, no Ken Burns. Needs `cvlc` or `vlc` installed, and falls back to `gstreamer` on its own if that is missing or the display backend cannot hand off control.",
     "slideshow.kenburns": "Slow pan and zoom across each picture.",
     "slideshow.kenburns_zoom": "How far in the pan starts, e.g. 1.12 = 12% larger than the screen.",
     "viewer.fit": "How a picture is placed on the screen. `auto` decides by shape and is what most frames want.",
@@ -276,6 +277,7 @@ LABELS = {
     "kenburns": "Ken Burns pan and zoom",
     "kenburns_zoom": "Ken Burns starting zoom",
     "video_max_seconds": "Stop a video after (s)",
+    "video_engine": "Video playback engine",
     "transition_time": "Transition length (s)",
     "interval": "Seconds per picture",
     "recent_days": "Treat photographs as new for (days)",
@@ -642,6 +644,7 @@ CHOICES: dict[str, list[str]] = {
     "clock.position": ["TL", "TC", "TR", "BL", "BC", "BR"],
     "viewer.text_position": ["", "TL", "TC", "TR", "BL", "BC", "BR"],
     "status.position": ["TL", "TC", "TR", "BL", "BC", "BR"],
+    "slideshow.video_engine": ["gstreamer", "vlc"],
 }
 
 #: Controls that need a list of options built at runtime.
@@ -937,8 +940,9 @@ def _state_video(c) -> str:
     s = c.slideshow
     if not c.library.include_videos:
         return "No videos in the library"
-    bits = ["plays to the end" if not s.video_max_seconds
-            else f"cut off after {_n(s.video_max_seconds)} s"]
+    bits = [f"{s.video_engine} engine"]
+    bits.append("plays to the end" if not s.video_max_seconds
+                else f"cut off after {_n(s.video_max_seconds)} s")
     bits.append("repeats until the interval is up" if s.video_loop else "never repeats")
     bits.append("silent" if s.video_mute else "with sound")
     return _cap(" · ".join(bits))
@@ -1109,8 +1113,8 @@ JOBS = [
                 "sync.versioning_days", "sync.gui_lan"]},
     {"name": "video", "kicker": "Video", "title": "How a video clip plays",
      "section": "slideshow", "state": _state_video,
-     "fields": ["slideshow.video_max_seconds", "slideshow.video_loop",
-                "slideshow.video_mute"]},
+     "fields": ["slideshow.video_engine", "slideshow.video_max_seconds",
+                "slideshow.video_loop", "slideshow.video_mute"]},
     {"name": "sleep", "kicker": "Sleep", "title": "When the screen turns off",
      "section": "power", "state": _state_sleep,
      "fields": ["power.enabled", "power.schedule", "power.dim_schedule"]},

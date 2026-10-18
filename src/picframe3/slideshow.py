@@ -386,6 +386,9 @@ class SlideshowController:
                 return
             self.frame._start_video(prepared.video_path)
             return
+        if self.frame.vlc_takeover:
+            self._tick_video_vlc()
+            return
         video = self.frame.video
         if video is None:                    # poster only: no player available
             return
@@ -401,10 +404,60 @@ class SlideshowController:
         else:
             self.end_slide()
 
+    def _tick_video_vlc(self) -> None:
+        """Poll the VLC subprocess that currently owns the display.
+
+        Nothing is drawn here -- the whole point of this engine is that VLC
+        is painting the screen directly -- this only notices when the clip
+        has ended so the frame can take the display back and move on.
+        """
+        vlc = self.frame.vlc
+        if vlc is not None and vlc.poll():
+            self.hold_slide()
+            return
+        self.frame.vlc_takeover = False
+        self.frame.reacquire_display()
+        # The last photograph the renderer drew is still there in its
+        # texture, under whatever VLC was just showing -- redrawing it is
+        # what makes the screen look right again rather than showing
+        # whatever the display happened to retain.
+        self.frame.mark_dirty()
+        self.end_slide()
+
+    def _start_video_vlc(self, path: str, cfg) -> bool:
+        """Try handing this clip to VLC.  True means handled (whether that
+        meant actually starting VLC or falling back to a still poster);
+        False means the caller should fall back to decoding it itself."""
+        from .media.vlc_takeover import VlcTakeover, available
+
+        if not available():
+            _log.info("video_engine: vlc but no vlc/cvlc binary found; "
+                      "falling back to the built-in decoder")
+            return False
+        if not self.frame.release_display():
+            _log.info("this backend cannot hand the display to another "
+                      "process; falling back to the built-in decoder")
+            return False
+        if self.frame.vlc is None:
+            self.frame.vlc = VlcTakeover(mute=cfg.video_mute, loop=cfg.video_loop,
+                                         max_seconds=self.video_window())
+        else:
+            self.frame.vlc.mute = cfg.video_mute
+            self.frame.vlc.loop = cfg.video_loop
+            self.frame.vlc.max_seconds = self.video_window()
+        if not self.frame.vlc.start(path):
+            self.frame.reacquire_display()
+            return False
+        self.video_started = True
+        self.frame.vlc_takeover = True
+        return True
+
     def start_video(self, path: str | None) -> None:
         if not path:
             return
         cfg = self.config.slideshow
+        if cfg.video_engine == "vlc" and self._start_video_vlc(path, cfg):
+            return
         try:
             from .media.video import VideoPlayer, available
 
@@ -436,6 +489,11 @@ class SlideshowController:
             self.end_slide()
 
     def stop_video(self) -> None:
+        if self.frame.vlc_takeover:
+            if self.frame.vlc is not None:
+                self.frame.vlc.stop()
+            self.frame.reacquire_display()
+            self.frame.vlc_takeover = False
         if self.frame.video is not None:
             self.frame.video.stop()
         self.video_started = False

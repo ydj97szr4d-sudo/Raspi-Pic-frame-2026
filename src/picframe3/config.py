@@ -72,6 +72,17 @@ class SlideshowConfig:
     video_loop: bool = False
     video_mute: bool = True
     video_max_seconds: float = 0.0        # 0 = play to the end
+    # "gstreamer": decode into the renderer's own texture -- crossfades,
+    # Ken Burns and overlays keep working over video, but every frame is a
+    # Python-side buffer copy plus a GL upload, which on this board is the
+    # ceiling (see video.py's module docstring). "vlc": hand the whole
+    # screen to VLC's own direct-to-DRM output for the clip's duration --
+    # smooth regardless of resolution, but nothing else can draw to the
+    # screen while it plays: no crossfade in or out, no clock/weather
+    # overlay, no Ken Burns. The frame's own renderer keeps its EGL context
+    # and every texture the whole time (only DRM master changes hands), so
+    # nothing needs reloading when VLC exits and control comes back.
+    video_engine: str = "gstreamer"       # or "vlc"
     kenburns: bool = False
     kenburns_zoom: float = 1.12
     #: Which transitions ``transition: random`` may draw from.  Empty means the

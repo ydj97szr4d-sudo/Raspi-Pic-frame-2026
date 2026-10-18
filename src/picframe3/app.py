@@ -60,6 +60,12 @@ class PicFrame:
         self.loader: SlideLoader | None = None
         self.geocoder: Geocoder | None = None
         self.video = None
+        #: The VLC subprocess for slideshow.video_engine: "vlc" (media/vlc_takeover.py).
+        self.vlc = None
+        #: True for as long as VLC owns the display directly (see
+        #: gfx/backend.py's release_display()) -- the render loop must not
+        #: touch the backend at all while this is set.
+        self.vlc_takeover = False
         self.backlight = BacklightControl()
         self.power = PowerSchedule(config.power.schedule, config.power.dim_schedule)
         self.health = Health(
@@ -373,6 +379,19 @@ class PicFrame:
                     # slide that was up when the screen went dark is the slide
                     # that is there when it comes back.
                     self._tick_video()
+                elif self.vlc_takeover:
+                    # The screen went off (power schedule, a manual toggle)
+                    # while VLC owned it directly -- VLC has no idea the
+                    # frame wants it paused, so end the clip outright and
+                    # take the display back rather than leave it running
+                    # against a dark panel forever.
+                    self._stop_video()
+                if self.vlc_takeover:
+                    # VLC is painting the screen itself; this process must not
+                    # touch the backend at all until it gives the display
+                    # back (polled inside _tick_video() above).
+                    await asyncio.sleep(0.2)
+                    continue
                 self._tick_overlays(now)
 
                 if (not self.paused and self.display_on
@@ -590,6 +609,13 @@ class PicFrame:
 
     def _stop_video(self) -> None:
         self.slideshow.stop_video()
+
+    def release_display(self) -> bool:
+        return self.backend.release_display() if self.backend is not None else False
+
+    def reacquire_display(self) -> None:
+        if self.backend is not None:
+            self.backend.reacquire_display()
 
     def _next_change_in(self, now: float) -> float:
         return self.slideshow.next_change_in(now)

@@ -150,6 +150,12 @@ class KmsBackend(Backend):
         #: False while the connector is switched off.  A disabled CRTC refuses
         #: every page flip, so there is nothing to present until it is back.
         self._powered = True
+        #: True between release_display() and reacquire_display() -- see
+        #: those methods.  Every frame still renders into the GBM surface
+        #: normally; only the final page-flip/modeset step is skipped, since
+        #: this process is no longer DRM master and the kernel would refuse
+        #: it anyway.
+        self._master_released = False
         self._drm.save_crtc(self.output.crtc_id)
         _log.info(
             "KMS backend on %s: %s %dx%d@%.2fHz (%s)",
@@ -189,7 +195,7 @@ class KmsBackend(Backend):
             raise
 
     def _present(self, bo: int) -> None:
-        if not self._powered:
+        if not self._powered or self._master_released:
             # The CRTC is disabled, so the kernel would refuse this flip -- and
             # a frame that cannot be shown is not worth a framebuffer, a queue
             # entry or a log line.  The buffer goes straight back; the picture
@@ -374,3 +380,36 @@ class KmsBackend(Backend):
 
     def get_power(self) -> bool | None:
         return self._drm.get_dpms(self.output.connector_id)
+
+    # -- handing the display to another process -----------------------------
+    def release_display(self) -> bool:
+        """Drop DRM master so another process (VLC's drm_vout) can become
+        master and drive the screen directly.
+
+        Deliberately shallow: only ``drmDropMaster`` is called.  EGL, GBM and
+        every GL object this process owns -- textures, shaders, the photo
+        that was on screen -- are untouched, because master is a property of
+        the file descriptor's relationship to the kernel, not of the
+        rendering context built on top of it.  That is what makes
+        ``reacquire_display()`` cheap: there is nothing to rebuild.
+        """
+        try:
+            self._drm.drop_master()
+        except Exception:  # pragma: no cover - driver dependent
+            _log.warning("could not drop DRM master", exc_info=True)
+            return False
+        self._master_released = True
+        return True
+
+    def reacquire_display(self) -> None:
+        if not self._master_released:
+            return
+        self._drm.become_master()
+        self._master_released = False
+        # Whatever just had the display (VLC) may have reprogrammed the CRTC
+        # to its own liking, or left it as a dangling reference to a
+        # framebuffer this process no longer holds.  Forcing a fresh
+        # drmModeSetCrtc on the next frame -- the same thing a DPMS wake-up
+        # does -- re-establishes it rather than trusting it is still what
+        # this process last set.
+        self._modeset_done = False

@@ -63,6 +63,18 @@ class Backend(abc.ABC):
     def get_power(self) -> bool | None:
         return None
 
+    def release_display(self) -> bool:
+        """Give up exclusive control of the display so another process (VLC's
+        own direct-to-DRM output, for ``slideshow.video_engine: vlc``) can take
+        it over.  Returns True if this backend can do that at all; a caller
+        that gets False back has to fall back to decoding the video itself.
+        """
+        return False
+
+    def reacquire_display(self) -> None:
+        """Take the display back after ``release_display()``.  No-op unless
+        that returned True."""
+
     def capture(self):
         """Read the frame currently being drawn back as an HxWx4 uint8 array.
 
