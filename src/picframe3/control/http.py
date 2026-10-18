@@ -1244,6 +1244,20 @@ def _thumbnail(path: str, is_video: bool) -> bytes | None:
     return render_preview(path, is_video, THUMB_SIZE)
 
 
+#: A video thumbnail is rendered by decoding one real frame through
+#: PicFrame3's own GStreamer pipeline (poster_frame()) -- the exact same
+#: hardware decoder (/dev/video10 on a Pi) that actual video playback uses,
+#: and render_preview() has no cache, so it is redone from scratch on every
+#: request. A gallery page full of video thumbnails fires many of these at
+#: once, and the default asyncio thread-pool executor happily runs as many
+#: as ~8 of them in parallel on a 4-core Pi -- each one competing for the
+#: same single shared hardware decode block, including with whatever the
+#: frame itself is currently playing. This serialises them to one at a
+#: time, so a page full of video thumbnails costs some loading time, never
+#: a pile of pipelines fighting over hardware the frame also needs.
+_video_thumbnail_lock = asyncio.Semaphore(1)
+
+
 async def _thumbnail_response(path: str, is_video: bool, versioned: bool = False):
     """One thumbnail, refused rather than decoded when it is absurdly large.
 
@@ -1256,7 +1270,11 @@ async def _thumbnail_response(path: str, is_video: bool, versioned: bool = False
     too_big = await _in_thread(_too_many_pixels, path, is_video)
     if too_big:
         raise HTTPException(413, too_big)
-    data = await _in_thread(_thumbnail, path, is_video)
+    if is_video:
+        async with _video_thumbnail_lock:
+            data = await _in_thread(_thumbnail, path, is_video)
+    else:
+        data = await _in_thread(_thumbnail, path, is_video)
     if data is None:
         raise HTTPException(415, "cannot render a thumbnail for this file")
     cache = ("public, max-age=86400, immutable" if versioned
