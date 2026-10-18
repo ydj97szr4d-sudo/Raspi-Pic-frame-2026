@@ -1,30 +1,25 @@
 # The interface's icon
 
-The mark is "Solid frame": a white picture frame on the interface's accent
-red, `#ec3013` — the same red as the save button and the section kickers, so
-the browser tab matches the page it opens. No corner radius, no gradient, no
-shadow, which is the same handwriting as the rest of the web UI.
+The mark is an eagle in flight, white/grey, on the app's own dark panel
+grey, `#201e1d` (`--panel` in `style.css`) — not the accent red; the red was
+a one-night mistake (see history on this file) that got caught and reverted.
 
 ## The master
 
-`src/picframe3/web/favicon.svg` is the master. Everything else is drawn from
-its numbers; if the art changes, regenerate the rasters rather than editing
-them.
+There is no vector source for the eagle itself -- it has only ever existed
+as raster art (the artist's original PNG is lost; what the repo has is the
+composited icons, recovered pixel-for-pixel from git history when the
+background briefly went red). `favicon.svg` and `icon-maskable.svg` are
+each an `<svg>` wrapping a base64 PNG, not real vector drawings, and
+`favicon-512x512.png` (plain) and `icon-maskable-512x512.png` (inset to the
+safe zone) are the closest things to masters: every other raster is a
+resize of one of those two, recomposited onto grey.
 
-Geometry on the 64-unit viewBox, stroke centred on the rectangle:
+If the eagle art itself ever needs to change, it has to be redrawn or
+resupplied as a new transparent PNG -- there is no geometry here to tweak,
+unlike a true vector mark.
 
-| | rect | stroke |
-|---|---|---|
-| `favicon.svg` | `x 13  y 15`, `38 × 34` | `6` |
-| `icon-maskable.svg` | `x 20.1  y 21.3`, `23.6 × 21.1` | `3.72` |
-
-The frame is a little wider than tall (11:10), which is what keeps it
-reading as a picture frame rather than a square. The maskable variant is the
-same mark inset to the 62 % safe zone with the red bleeding to the edge, so
-an Android launcher may crop it to a circle, a squircle or anything else
-without cutting into the frame.
-
-Tokens: field `#ec3013`, aperture `#ffffff`, page ink `#201e1d`, ground
+Tokens: ground `#201e1d`, page ink `#201e1d`, ground (light theme)
 `#f3f2f2`.
 
 ## The files
@@ -46,38 +41,48 @@ interface is opened by IP, by hostname and by `.local` name alike.
 `tools/check_package_data.py` lists every one of them, so a wheel that
 forgets an icon fails the check instead of shipping a frame with a blank tab.
 
-The two `theme-color` metas in `index.html` are *not* the icon's red on
+The two `theme-color` metas in `index.html` are *not* the icon's grey on
 purpose: they follow the page background per theme, which is what the
 browser's own chrome should match.
 
 ## Regenerating the rasters
 
-Any SVG rasteriser will do. From the repository root, with Pillow:
+Start from the two true-alpha masters -- a transparent-background PNG of
+the eagle (plain) and one inset to the maskable safe zone -- and composite
+each onto solid grey at whatever size is needed. With Pillow:
 
 ```python
-from PIL import Image, ImageDraw
+from PIL import Image
 
-RED, WHITE = "#ec3013", "#ffffff"
-PLAIN = dict(x=13, y=15, w=38, h=34, sw=6)
-MASK = dict(x=20.1, y=21.3, w=23.6, h=21.1, sw=3.72)
+GREY = (32, 30, 29)  # #201e1d
 
-def render(size, m, ss=8):
-    """The two rectangles the SVG draws, supersampled then downsampled."""
-    k, half = size * ss / 64, m["sw"] / 2
-    im = Image.new("RGB", (size * ss, size * ss), RED)
-    d = ImageDraw.Draw(im)
-    d.rectangle([v * k for v in (m["x"] - half, m["y"] - half,
-                                 m["x"] + m["w"] + half, m["y"] + m["h"] + half)], fill=WHITE)
-    d.rectangle([v * k for v in (m["x"] + half, m["y"] + half,
-                                 m["x"] + m["w"] - half, m["y"] + m["h"] - half)], fill=RED)
-    return im.resize((size, size), Image.LANCZOS)
+def on_grey(rgba):
+    bg = Image.new("RGBA", rgba.size, GREY + (255,))
+    return Image.alpha_composite(bg, rgba).convert("RGB")
 
-render(180, PLAIN).save("src/picframe3/web/apple-touch-icon.png", optimize=True)
-render(192, PLAIN).save("src/picframe3/web/favicon-192x192.png", optimize=True)
-render(512, PLAIN).save("src/picframe3/web/favicon-512x512.png", optimize=True)
-render(512, MASK).save("src/picframe3/web/icon-maskable-512x512.png", optimize=True)
-render(256, PLAIN).save("src/picframe3/web/favicon.ico", sizes=[(16, 16), (32, 32), (48, 48)])
+plain = Image.open("plain_master.png").convert("RGBA")      # transparent eagle
+maskable = Image.open("maskable_master.png").convert("RGBA")  # inset to the safe zone
+
+out = "src/picframe3/web/"
+on_grey(plain).save(out + "favicon-512x512.png", optimize=True)
+on_grey(plain.resize((192, 192), Image.LANCZOS)).save(out + "favicon-192x192.png", optimize=True)
+on_grey(plain.resize((180, 180), Image.LANCZOS)).save(out + "apple-touch-icon.png", optimize=True)
+on_grey(maskable).save(out + "icon-maskable-512x512.png", optimize=True)
+on_grey(plain.resize((48, 48), Image.LANCZOS)).save(
+    out + "favicon.ico", sizes=[(16, 16), (32, 32), (48, 48)])
 ```
 
-Supersampling by 8 and downsampling is what keeps the frame's edges clean at
-16 px, where a direct draw would land them between pixels.
+Then wrap `favicon-512x512.png` and `icon-maskable-512x512.png` each in a
+one-line `<svg viewBox="0 0 512 512"><image .../></svg>` (base64-encoded)
+to produce `favicon.svg` and `icon-maskable.svg`.
+
+If starting instead from an already-composited-on-some-other-color PNG (as
+happened recovering these from git history after the red mistake), the
+alpha can be recovered algebraically rather than guessed, *provided* the
+foreground art is pure grayscale and the background is a known solid
+color: for background `(br, bg, bb)` and an observed pixel `(r, g, b)`,
+`1 - alpha = (r - g) / (br - bg)` (pick whichever channel pair differs
+most for numerical stability), then the original grayscale value falls out
+of the standard over-compositing equation. This reproduces the exact
+original pixels and anti-aliasing rather than resampling from a
+differently-sized source.
