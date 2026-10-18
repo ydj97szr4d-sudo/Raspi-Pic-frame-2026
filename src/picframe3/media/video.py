@@ -68,6 +68,38 @@ def available() -> bool:
 #: panel, not a sideways film filling the screen.
 _ORIENT = "videoflip video-direction=auto"
 
+_has_v4l2convert: bool | None = None
+
+
+def _v4l2convert_available() -> bool:
+    """Whether the ``v4l2convert`` GStreamer element is installed, cached
+    after the first check.
+
+    On a Pi 4/5, the hardware H.264/HEVC decoder (``v4l2h264dec``) hands its
+    frames out as ``video/x-raw(memory:DMABuf)`` -- a zero-copy buffer that
+    still lives in GPU/DMA memory, not regular RAM. ``videoconvert``, used
+    right after it in the sink pipeline below, is a software colour-space
+    converter: it has no fast path for DMABuf, so it falls back to mapping
+    the whole frame out to CPU memory itself, one frame at a time, at
+    whatever resolution the clip is. On a Pi 4 that mapping alone is enough
+    to peg a full CPU core and drop playback to a handful of frames a
+    second -- decode itself is instant, on the VPU, and never shows up as
+    the bottleneck, which is why this was easy to misdiagnose as a decoder
+    problem. ``v4l2convert`` is the Pi's own hardware ISP-based converter:
+    it imports DMABuf for free and does the colour conversion/scaling in
+    hardware, so inserting it before ``videoconvert`` gives that element
+    an ordinary, already-mapped frame to work with instead. Harmless to
+    insert even when the source clip's decoder does NOT hand out DMABuf
+    (e.g. a software-decoded or oddly-profiled file) -- it passes ordinary
+    raw video through unchanged."""
+    global _has_v4l2convert
+    if _has_v4l2convert is None:
+        if not available():
+            _has_v4l2convert = False
+        else:
+            _has_v4l2convert = Gst.ElementFactory.find("v4l2convert") is not None
+    return _has_v4l2convert
+
 
 def _uri(path: str) -> str:
     from urllib.parse import quote
@@ -315,8 +347,14 @@ class VideoPlayer:
         # filmed upright happens before it (see _ORIENT), so the renderer never
         # learns that a video was rotated either.
         borders = "false" if self.fit == "cover" else "true"
+        # v4l2convert, when present, does the Pi's hardware-decoder-output
+        # (DMABuf) import and colour conversion on the ISP instead of
+        # leaving videoconvert to map it out to CPU memory itself -- see
+        # _v4l2convert_available()'s docstring for why that mapping alone
+        # can be the whole bottleneck on a Pi 4.
+        hw_convert = "v4l2convert ! " if _v4l2convert_available() else ""
         sink_desc = (
-            f"videoconvert ! {_ORIENT} ! videoscale add-borders={borders} "
+            f"{hw_convert}videoconvert ! {_ORIENT} ! videoscale add-borders={borders} "
             f"! video/x-raw,format=RGBA,width={w},height={h},pixel-aspect-ratio=1/1 "
             f"! appsink name=sink max-buffers=2 drop=true sync=true"
         )
