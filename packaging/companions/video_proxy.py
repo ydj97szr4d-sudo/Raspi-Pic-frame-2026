@@ -56,6 +56,21 @@ Deploy notes
 - No extra Python packages needed -- stdlib + subprocess only (PyYAML is
   already installed in this venv for dht_mqtt.py's config loading).
 - Run under systemd (service: video-proxy) with Restart=always.
+
+Playback coordination
+----------------------
+nice/ionice alone only change *CPU scheduling* priority -- they don't stop
+this process from competing with the frame for the Pi's shared disk I/O,
+memory bandwidth, or (when the hardware encoder is in play) the single VPU
+block the frame's own hardware video decode also uses. On a Pi 4 that
+contention is enough to make playback stutter even with this process fully
+deprioritised. So before transcoding each file, this also asks PicFrame3's
+own HTTP API (GET /api/state) whether a video is actually playing right
+now, and skips that file for this scan if so -- it's picked up again next
+scan_interval, by which point playback has very likely moved on. Any
+failure to reach the API (http disabled, wrong port, frame not running)
+is treated as "not playing" -- this is a courtesy, not a safety check, and
+a transiently-unreachable API shouldn't be able to wedge transcoding.
 """
 import datetime
 import json
@@ -63,6 +78,8 @@ import os
 import shutil
 import subprocess
 import time
+import urllib.error
+import urllib.request
 
 CONFIG_PATH = os.path.expanduser("~/.config/picframe3/config.yaml")
 STATE_FILE = os.path.expanduser("~/.local/share/picframe3/video_proxy_state.json")
@@ -118,6 +135,37 @@ def load_settings(cfg):
     settings = dict(DEFAULT_SETTINGS)
     settings.update((cfg.get("video_proxy") or {}))
     return settings
+
+
+# --------------------------------------------------------------------------
+# Playback coordination -- see the "Playback coordination" note up top
+# --------------------------------------------------------------------------
+
+def frame_is_playing_video(cfg, timeout=2.0):
+    """Ask PicFrame3's own HTTP API whether a video is on screen right now.
+
+    Returns False (i.e. "go ahead and transcode") on any failure to reach
+    or parse the API -- this is a courtesy to playback smoothness, not a
+    correctness requirement, and must never be able to wedge transcoding
+    just because the frame's web server is briefly unreachable."""
+    http_cfg = cfg.get("http") or {}
+    if not http_cfg.get("enabled", True):
+        return False
+    port = http_cfg.get("port", 9000)
+    url = f"http://127.0.0.1:{port}/api/state"
+    req = urllib.request.Request(url)
+    user = http_cfg.get("auth_user") or ""
+    password = http_cfg.get("auth_password") or ""
+    if user and password:
+        import base64
+        token = base64.b64encode(f"{user}:{password}".encode()).decode()
+        req.add_header("Authorization", f"Basic {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+        return False
+    return bool((payload.get("video") or {}).get("playing"))
 
 
 # --------------------------------------------------------------------------
@@ -412,6 +460,10 @@ def scan_once(state):
 
         box = (settings["long_side_max"], settings["short_side_max"])
         if needs_transcode(width, height, settings):
+            if frame_is_playing_video(cfg):
+                log(f"a video is playing right now -- deferring "
+                    f"{os.path.basename(path)} to next scan")
+                continue
             ok = transcode(path, width, height, settings)
             if ok:
                 state[path] = {**file_fingerprint(path), "status": "transcoded", "box": box}
