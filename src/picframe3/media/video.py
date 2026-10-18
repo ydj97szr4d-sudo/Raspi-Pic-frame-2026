@@ -50,11 +50,40 @@ def available() -> bool:
         if not _Gst.is_initialized():
             _Gst.init(None)
         Gst, GstApp = _Gst, _GstApp
+        _lower_v4l2h264dec_rank()
         _gst_ready = True
     except Exception as exc:
         _log.info("GStreamer unavailable (%s); videos will be skipped", exc)
         _gst_ready = False
     return _gst_ready
+
+
+def _lower_v4l2h264dec_rank() -> None:
+    """Keep decodebin3 off the Pi's hardware H.264 decoder element.
+
+    ``v4l2h264dec`` is unreliable on this board's kernel/driver combination
+    (bcm2835-codec): depending on the clip it either fails caps negotiation
+    outright (returns an empty sink caps, so GStreamer falls back to
+    software on its own) or fails allocating its V4L2 buffer pool outright
+    ("VIDIOC_REQBUFS failed: Invalid argument") -- confirmed independently
+    in both GStreamer and ffmpeg's own V4L2 M2M path, the latter on a clip
+    that otherwise plays fine. That second failure mode is a hard pipeline
+    error, not a graceful fallback, so letting decodebin3 try it at all is
+    pure downside: software decode (avdec_h264) plus the colorimetry
+    relabel in play() below is already fast enough on its own -- 30+fps
+    measured on a 1080p clip that triggers the bug, with zero drops over a
+    71s run -- so there is no upside to risking it. HEVC's hardware
+    decoder (``v4l2slh265dec``, a different kernel module and code path
+    entirely -- the stateless V4L2 request API, not this stateful one) is
+    left alone: it has not shown either failure mode.
+    """
+    try:
+        feature = Gst.Registry.get().find_feature("v4l2h264dec", Gst.ElementFactory)
+        if feature is not None:
+            feature.set_rank(Gst.Rank.NONE)
+            _log.info("ranked v4l2h264dec down to NONE (unreliable on this board)")
+    except Exception as exc:
+        _log.debug("could not lower v4l2h264dec's rank: %s", exc)
 
 
 #: Turns the picture the way the file says it should be shown.  A phone films
@@ -67,39 +96,6 @@ def available() -> bool:
 #: the upright picture: a portrait clip gets bars left and right on a landscape
 #: panel, not a sideways film filling the screen.
 _ORIENT = "videoflip video-direction=auto"
-
-_has_v4l2convert: bool | None = None
-
-
-def _v4l2convert_available() -> bool:
-    """Whether the ``v4l2convert`` GStreamer element is installed, cached
-    after the first check.
-
-    On a Pi 4/5, the hardware H.264/HEVC decoder (``v4l2h264dec``) hands its
-    frames out as ``video/x-raw(memory:DMABuf)`` -- a zero-copy buffer that
-    still lives in GPU/DMA memory, not regular RAM. ``videoconvert``, used
-    right after it in the sink pipeline below, is a software colour-space
-    converter: it has no fast path for DMABuf, so it falls back to mapping
-    the whole frame out to CPU memory itself, one frame at a time, at
-    whatever resolution the clip is. On a Pi 4 that mapping alone is enough
-    to peg a full CPU core and drop playback to a handful of frames a
-    second -- decode itself is instant, on the VPU, and never shows up as
-    the bottleneck, which is why this was easy to misdiagnose as a decoder
-    problem. ``v4l2convert`` is the Pi's own hardware ISP-based converter:
-    it imports DMABuf for free and does the colour conversion/scaling in
-    hardware, so inserting it before ``videoconvert`` gives that element
-    an ordinary, already-mapped frame to work with instead. Harmless to
-    insert even when the source clip's decoder does NOT hand out DMABuf
-    (e.g. a software-decoded or oddly-profiled file) -- it passes ordinary
-    raw video through unchanged."""
-    global _has_v4l2convert
-    if _has_v4l2convert is None:
-        if not available():
-            _has_v4l2convert = False
-        else:
-            _has_v4l2convert = Gst.ElementFactory.find("v4l2convert") is not None
-    return _has_v4l2convert
-
 
 def _uri(path: str) -> str:
     from urllib.parse import quote
@@ -347,42 +343,35 @@ class VideoPlayer:
         # filmed upright happens before it (see _ORIENT), so the renderer never
         # learns that a video was rotated either.
         borders = "false" if self.fit == "cover" else "true"
-        # v4l2convert, when present, does the Pi's hardware-decoder-output
-        # (DMABuf) import and colour conversion on the ISP instead of
-        # leaving videoconvert to map it out to CPU memory itself -- see
-        # _v4l2convert_available()'s docstring for why that mapping alone
-        # can be the whole bottleneck on a Pi 4.
-        #
-        # The ISP is picky about the *primaries* field of the incoming
-        # colorimetry, though, in a way videoconvert never was: phone
-        # clips (observed on iPhone exports) tag their decoded frames
-        # with a primaries index the v4l2convert driver flatly refuses
-        # ("Device wants 2:4:5:1 colorimetry" when handed 2:4:5:11),
-        # which fails caps negotiation and silences the whole hardware
-        # path for that clip -- forcing the heavy colour-space conversion
-        # back onto the CPU and capping playback at a few FPS even though
-        # decode itself is fine.  Forcing the primaries field back to 1
-        # (BT.709) just before v4l2convert is a label fix, not a colour
-        # conversion -- range and matrix already match what the ISP
-        # wants, only primaries doesn't, and the visible tint difference
-        # from treating a Display-P3-tagged frame as BT.709 is
-        # negligible on a photo frame.  videoconvert (the no-ISP
-        # fallback below) never needed this: it accepts any colorimetry.
+        # videoconvert takes a much slower, colour-managed path for a
+        # frame whose *primaries* field is anything other than a small set
+        # of standard values -- confirmed directly: the exact same clip
+        # went from ~5-7fps to 30+fps on this board the moment the tag
+        # alone was corrected, decode and every other element unchanged.
+        # Phone clips (observed on iPhone exports) tag their decoded
+        # frames with a primaries index (11, likely Display-P3) that
+        # triggers this slow path; range and matrix are already standard,
+        # only primaries is unusual, so relabelling it to 1 (BT.709) is a
+        # label fix, not a colour conversion, and the visible tint
+        # difference is negligible on a photo frame. Earlier this also
+        # fed a hardware ISP element (v4l2convert) for a DMABuf frame, but
+        # that path turned out to be unnecessary -- the relabel alone is
+        # what made videoconvert fast, and v4l2convert/v4l2h264dec (see
+        # _lower_v4l2h264dec_rank's docstring) brought nothing but a
+        # chance of a hard decoder failure on some clips. So this is now
+        # unconditional and the only element added to the plain sink.
         #
         # ``capsfilter`` is the wrong element for this: given only
-        # "colorimetry=...", it treats every other field (memory
-        # feature, pixel format, resolution) as constrained to nothing
-        # specified and rejects the decoder's actual DMABuf/NV12 output
-        # outright ("transform_caps returned caps ANY which are not a
-        # real subset"). ``capssetter`` (join=true, replace=false, both
+        # "colorimetry=...", it treats every other field (pixel format,
+        # resolution, memory feature) as constrained to nothing specified
+        # and rejects the decoder's actual output caps outright
+        # ("transform_caps returned caps ANY which are not a real
+        # subset"). ``capssetter`` (join=true, replace=false, both
         # defaults) does the narrower thing: pass every field through
         # unchanged and only overwrite the one(s) named in its own caps.
-        hw_convert = (
-            'capssetter caps="video/x-raw,colorimetry=(string)2:4:5:1" ! v4l2convert ! '
-            if _v4l2convert_available() else ""
-        )
         sink_desc = (
-            f"{hw_convert}videoconvert ! {_ORIENT} ! videoscale add-borders={borders} "
+            'capssetter caps="video/x-raw,colorimetry=(string)2:4:5:1" ! '
+            f"videoconvert ! {_ORIENT} ! videoscale add-borders={borders} "
             f"! video/x-raw,format=RGBA,width={w},height={h},pixel-aspect-ratio=1/1 "
             f"! appsink name=sink max-buffers=2 drop=true sync=true"
         )
