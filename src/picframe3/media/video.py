@@ -352,7 +352,35 @@ class VideoPlayer:
         # leaving videoconvert to map it out to CPU memory itself -- see
         # _v4l2convert_available()'s docstring for why that mapping alone
         # can be the whole bottleneck on a Pi 4.
-        hw_convert = "v4l2convert ! " if _v4l2convert_available() else ""
+        #
+        # The ISP is picky about the *primaries* field of the incoming
+        # colorimetry, though, in a way videoconvert never was: phone
+        # clips (observed on iPhone exports) tag their decoded frames
+        # with a primaries index the v4l2convert driver flatly refuses
+        # ("Device wants 2:4:5:1 colorimetry" when handed 2:4:5:11),
+        # which fails caps negotiation and silences the whole hardware
+        # path for that clip -- forcing the heavy colour-space conversion
+        # back onto the CPU and capping playback at a few FPS even though
+        # decode itself is fine.  Forcing the primaries field back to 1
+        # (BT.709) just before v4l2convert is a label fix, not a colour
+        # conversion -- range and matrix already match what the ISP
+        # wants, only primaries doesn't, and the visible tint difference
+        # from treating a Display-P3-tagged frame as BT.709 is
+        # negligible on a photo frame.  videoconvert (the no-ISP
+        # fallback below) never needed this: it accepts any colorimetry.
+        #
+        # ``capsfilter`` is the wrong element for this: given only
+        # "colorimetry=...", it treats every other field (memory
+        # feature, pixel format, resolution) as constrained to nothing
+        # specified and rejects the decoder's actual DMABuf/NV12 output
+        # outright ("transform_caps returned caps ANY which are not a
+        # real subset"). ``capssetter`` (join=true, replace=false, both
+        # defaults) does the narrower thing: pass every field through
+        # unchanged and only overwrite the one(s) named in its own caps.
+        hw_convert = (
+            'capssetter caps="video/x-raw,colorimetry=(string)2:4:5:1" ! v4l2convert ! '
+            if _v4l2convert_available() else ""
+        )
         sink_desc = (
             f"{hw_convert}videoconvert ! {_ORIENT} ! videoscale add-borders={borders} "
             f"! video/x-raw,format=RGBA,width={w},height={h},pixel-aspect-ratio=1/1 "
