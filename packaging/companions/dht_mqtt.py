@@ -745,9 +745,24 @@ def _dot_grid_image(filled, dot_d, gap, rows=4, cols=4, filled_alpha=235, unfill
     return hi.resize((w, h), Image.LANCZOS)
 
 
+#: The last canvas actually written, as raw pixel bytes -- compared before
+#: every save so a cycle where nothing visibly changed (the common case:
+#: the DHT reading is flat, the dot grid hasn't ticked down, no new minute)
+#: does not touch OVERLAY_IMAGE's mtime at all. PicFrame3's own
+#: _tick_user_overlay() watches that mtime and reloads + full-screen
+#: LANCZOS-resizes the PNG the instant it changes, on its main render
+#: thread -- a real stall if it fires every INTERVAL seconds forever,
+#: video or no video, for a file that is usually pixel-identical to the
+#: one before it anyway.
+_last_canvas_bytes = None
+
+
 def write_overlay(line_text, filled_dots):
     """Draws the weather line + idle-countdown dot grid as one PNG and
-    writes it (atomically) to OVERLAY_IMAGE for PicFrame3 to pick up."""
+    writes it (atomically) to OVERLAY_IMAGE for PicFrame3 to pick up --
+    but only when the rendered canvas actually differs from the last one
+    written (see _last_canvas_bytes above)."""
+    global _last_canvas_bytes
     try:
         caption_font = ImageFont.truetype(FONT_PATH, max(11, int(CLOCK_SIZE * EXTRA_SCALE)))
     except OSError:
@@ -866,6 +881,11 @@ def write_overlay(line_text, filled_dots):
 
             x, y = _anchor_xy("BR", list(CLOCK_OFFSET_PCT), (widget.width, widget.height))
             canvas.alpha_composite(widget, (x, y))
+
+    data = canvas.tobytes()
+    if data == _last_canvas_bytes:
+        return
+    _last_canvas_bytes = data
 
     tmp = OVERLAY_IMAGE + ".tmp.png"
     canvas.save(tmp)

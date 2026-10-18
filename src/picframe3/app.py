@@ -886,10 +886,16 @@ class PicFrame:
         try:
             from PIL import Image
 
+            target = (self.backend.width, self.backend.height)
             with Image.open(path) as img:
-                image = img.convert("RGBA").resize(
-                    (self.backend.width, self.backend.height), Image.LANCZOS
-                )
+                image = img.convert("RGBA")
+                # The common case (a companion script drawing at the real
+                # screen resolution, e.g. dht_mqtt.py's overlay) is already
+                # this exact size -- skip the LANCZOS resample for those,
+                # since it changes nothing but costs a full-screen resize
+                # on this (the main render) thread for no visual gain.
+                if image.size != target:
+                    image = image.resize(target, Image.LANCZOS)
             renderer.set_overlay("user", image, x=0, y=0, alpha=1.0, z=5)
             self._dirty = True
         except Exception as exc:
