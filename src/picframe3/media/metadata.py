@@ -66,6 +66,11 @@ class PhotoMeta:
     rating: int | None = None
     is_video: bool = False
     duration: float | None = None
+    #: Where to centre a "cover" crop so a detected face (and its hair) stays
+    #: on screen: an (x, y) fraction of the image, PIL ``ImageOps.fit``-style.
+    #: None means no face was found, detection is off, or this is a video --
+    #: the fixed default centering in ``media.prepare`` is used instead.
+    face_anchor: tuple[float, float] | None = None
 
     @property
     def is_portrait(self) -> bool:

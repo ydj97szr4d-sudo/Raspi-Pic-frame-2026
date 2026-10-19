@@ -129,6 +129,8 @@ class PicFrame:
         self._capture_request: asyncio.Future | None = None
         self._location_backfill_at = 0.0
         self._backfilling = False
+        self._face_backfill_at = 0.0
+        self._face_backfilling = False
         #: What the off-schedule last decided, or None when there is no
         #: schedule.  The schedule acts on its edges; between them the display
         #: belongs to whoever last touched it.
@@ -230,6 +232,7 @@ class PicFrame:
             cfg.library.picture_folders,
             follow_links=cfg.library.follow_links,
             geocoder=self.geocoder,
+            detect_faces=cfg.viewer.detect_faces,
             include_videos=cfg.library.include_videos,
             ignore_hidden=cfg.library.ignore_hidden,
             exclude=self._scan_exclusions(),
@@ -1632,6 +1635,23 @@ class PicFrame:
                 self._location_backfill_at = now
                 asyncio.create_task(self._backfill_locations())
 
+            # Same trickle, for face detection: a cascade pass per photo is
+            # cheap enough one at a time but not free in bulk, so a backlog
+            # of thousands (turning the setting on for the first time on an
+            # existing library) is worked through a few at a time rather than
+            # all at once on the render thread's doorstep.
+            if self.scanner is not None:
+                # ``viewer`` is a live-reloadable section (see uischema's
+                # LIVE_SECTIONS) -- ticking the setting on in settings must
+                # not need a restart to be believed, so the scanner's copy is
+                # kept in step with the config's rather than fixed at startup.
+                self.scanner.detect_faces = self.config.viewer.detect_faces
+            if (self.scanner is not None and self.config.viewer.detect_faces
+                    and not self._face_backfilling
+                    and now - self._face_backfill_at > 20.0):
+                self._face_backfill_at = now
+                asyncio.create_task(self._backfill_face_anchors())
+
             if now - self._fps_window >= 5.0:
                 self._fps = self._frames / (now - self._fps_window)
                 self._frames = 0
@@ -1679,6 +1699,21 @@ class PicFrame:
                 self.current[0] = fresh
                 self._build_info_overlay(self.current)
                 self._dirty = True
+
+    async def _backfill_face_anchors(self) -> None:
+        # Same guard as _backfill_locations and for the same reason: a
+        # cascade pass can take a while on a Pi, and without this a new run
+        # would stack up behind the last one every twenty seconds rather than
+        # waiting for it.
+        if self._face_backfilling:
+            return
+        self._face_backfilling = True
+        try:
+            await self.scanner.backfill_face_anchors_async(limit=10)
+        except Exception:  # pragma: no cover - a corrupt file on disk
+            return
+        finally:
+            self._face_backfilling = False
 
     def _library_changed(self) -> None:
         if self.playlist is None:

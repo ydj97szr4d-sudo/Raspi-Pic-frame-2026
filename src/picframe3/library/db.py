@@ -31,7 +31,7 @@ from ..media.metadata import PhotoMeta
 
 _log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -81,6 +81,15 @@ CREATE TABLE IF NOT EXISTS files (
     held          INTEGER NOT NULL DEFAULT 0,
     -- SHA-256, filled in only for files that matched something in `holds`.
     digest        TEXT,
+    -- Where a "cover" crop should centre itself to keep a detected face (and
+    -- its hair) on screen -- each a 0..1 fraction of the image, PIL
+    -- ImageOps.fit-style. NULL until face_checked is set; still NULL after
+    -- that means detection ran and found nothing to anchor on (or is
+    -- switched off), which is exactly the state that should fall back to the
+    -- frame's ordinary fixed centering, not be retried on every scan.
+    face_cx       REAL,
+    face_cy       REAL,
+    face_checked  INTEGER NOT NULL DEFAULT 0,
     indexed_at    REAL    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS files_folder  ON files(folder);
@@ -162,7 +171,8 @@ _COLUMNS = (
     "width", "height", "orientation", "is_portrait", "taken_at", "make", "model",
     "lens", "f_number", "exposure_time", "iso", "focal_length", "latitude",
     "longitude", "location", "title", "caption", "rating", "duration",
-    "play_count", "last_played", "hidden", "held", "digest", "indexed_at",
+    "play_count", "last_played", "hidden", "held", "digest",
+    "face_cx", "face_cy", "face_checked", "indexed_at",
 )
 
 
@@ -202,6 +212,9 @@ class Record:
     hidden: bool
     held: bool
     digest: str | None
+    face_cx: float | None
+    face_cy: float | None
+    face_checked: bool
     indexed_at: float
     tags: list[str] = None  # type: ignore[assignment]
 
@@ -235,6 +248,11 @@ class Record:
             rating=self.rating,
             is_video=bool(self.is_video),
             duration=self.duration,
+            face_anchor=(
+                (self.face_cx, self.face_cy)
+                if self.face_cx is not None and self.face_cy is not None
+                else None
+            ),
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -360,8 +378,25 @@ class Library:
                              "held INTEGER NOT NULL DEFAULT 0")
                 conn.execute("ALTER TABLE files ADD COLUMN digest TEXT")
             _log.info("index upgraded to schema v3 (added held, digest)")
+        # v4 added face-aware cropping: files.face_cx/face_cy (the anchor) and
+        # files.face_checked (has detection run on this file at all).  An
+        # older index has every row at face_checked=0, which is exactly
+        # "not looked at yet" -- the right starting state for a backfill to
+        # work through, same as locations_missing() does for geocoding.
+        if "face_checked" not in columns:
+            with self.transaction():
+                conn.execute("ALTER TABLE files ADD COLUMN face_cx REAL")
+                conn.execute("ALTER TABLE files ADD COLUMN face_cy REAL")
+                conn.execute("ALTER TABLE files ADD COLUMN "
+                             "face_checked INTEGER NOT NULL DEFAULT 0")
+            _log.info("index upgraded to schema v4 (added face_cx, face_cy, face_checked)")
         with self.transaction():
             conn.execute("CREATE INDEX IF NOT EXISTS files_round ON files(play_round)")
+            # Unconditional (unlike the ALTERs above) so a fresh database --
+            # which already has face_checked from _SCHEMA and never takes the
+            # v4 branch above -- gets the index too.
+            conn.execute("CREATE INDEX IF NOT EXISTS files_face_checked "
+                         "ON files(face_checked)")
             # The indices below are the ones the playlist's ORDER BY clauses
             # actually use.  files_hidden and files_portrait never were: both
             # columns hold two values over the whole library, so SQLite reads
@@ -434,6 +469,13 @@ class Library:
                     held, digest, indexed_at
                 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(path) DO UPDATE SET
+                    -- This row only runs for a file that is new or whose bytes
+                    -- have changed (see upsert()'s callers), so whatever face
+                    -- anchor was cached for the old bytes is stale -- cleared
+                    -- here, the same way `hidden` is, so the backfill gives it
+                    -- a fresh look rather than keeping a crop centred on a
+                    -- photograph this file no longer is.
+                    face_cx=NULL, face_cy=NULL, face_checked=0,
                     folder=excluded.folder, basename=excluded.basename, ext=excluded.ext,
                     mtime=excluded.mtime, size=excluded.size, is_video=excluded.is_video,
                     width=excluded.width, height=excluded.height,
@@ -836,6 +878,44 @@ class Library:
             (limit,),
         ).fetchall()
         return [(r["id"], r["latitude"], r["longitude"]) for r in rows]
+
+    def faces_missing(self, limit: int = 25) -> list[tuple[int, str]]:
+        """Pictures that have not had a face search run on them yet.
+
+        Decoupled from indexing for the same reason geocoding is: scanning
+        must not wait on a per-photo cascade pass, and turning face-aware
+        cropping on later has to be able to work through everything already
+        indexed. Videos are excluded -- there is no single frame to search --
+        and so are hidden and held-out files, which will never be shown.
+        """
+        rows = self.connect().execute(
+            "SELECT id, path FROM files WHERE face_checked=0 "
+            "AND is_video=0 AND hidden=0 AND held=0 "
+            "ORDER BY COALESCE(taken_at, mtime) DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [(r["id"], r["path"]) for r in rows]
+
+    def set_face_anchor(self, file_id: int, anchor: tuple[float, float] | None) -> None:
+        """Record a face search's result -- found, or confirmed empty.
+
+        Called exactly once per file per set of bytes (see upsert()'s reset of
+        face_checked on change): ``anchor=None`` means the search ran and
+        found nothing, which is recorded the same as a found one so the
+        backfill does not keep retrying a photograph with nobody in it.
+        """
+        cx, cy = anchor if anchor is not None else (None, None)
+        with self.transaction() as conn:
+            conn.execute(
+                "UPDATE files SET face_cx=?, face_cy=?, face_checked=1 WHERE id=?",
+                (cx, cy, file_id),
+            )
+
+    def count_faces_missing(self) -> int:
+        return self.connect().execute(
+            "SELECT COUNT(*) AS n FROM files WHERE face_checked=0 "
+            "AND is_video=0 AND hidden=0 AND held=0"
+        ).fetchone()["n"]
 
     def count_locations_missing(self) -> int:
         return self.connect().execute(

@@ -11,8 +11,10 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..media import face as face_module
 from ..media import metadata
 from ..media.geocode import Geocoder
+from ..media.prepare import open_oriented
 from .db import Library
 from .digest import file_digest
 from .watch import InotifyWatcher
@@ -63,6 +65,7 @@ class Scanner:
         *,
         follow_links: bool = False,
         geocoder: Geocoder | None = None,
+        detect_faces: bool = False,
         include_videos: bool = True,
         ignore_hidden: bool = True,
         exclude: Sequence[str] = (),
@@ -73,6 +76,11 @@ class Scanner:
         self.roots = [os.path.abspath(os.path.expanduser(r)) for r in roots]
         self.follow_links = follow_links
         self.geocoder = geocoder
+        #: Whether backfill_face_anchors() may do anything at all.  Checked
+        #: here rather than left to face_module.available() alone, so a
+        #: picture frame without OpenCV installed is not quietly running (and
+        #: logging about) a feature nobody turned on.
+        self.detect_faces = detect_faces
         self.include_videos = include_videos
         self.ignore_hidden = ignore_hidden
         self.exclude = [e for e in exclude if e]
@@ -392,6 +400,41 @@ class Scanner:
     async def backfill_locations_async(self, limit: int = 25) -> int:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._pool, self.backfill_locations, limit)
+
+    # -- face-aware cropping -------------------------------------------------
+    def backfill_face_anchors(self, limit: int = 25) -> int:
+        """Run face detection on a few more pictures that haven't had it yet.
+
+        Decoupled from the scan itself for the same reason geocoding is (see
+        :meth:`backfill_locations`): a cascade pass is not something to make a
+        scan wait on, and turning face-aware cropping on later has to be able
+        to work back through a library that was already indexed.
+
+        Returns how many files were looked at (found or not), not how many
+        turned up a face -- a quiet library of landscapes backfilling to
+        completion and staying there is the success case, not a stall.
+        """
+        if not self.detect_faces or not face_module.available():
+            return 0
+        pending = self.library.faces_missing(limit)
+        for file_id, path in pending:
+            anchor = None
+            try:
+                img = open_oriented(path, target=(640, 640))
+                if img is not None:
+                    anchor = face_module.detect_anchor(img)
+                    img.close()
+            except Exception as exc:  # pragma: no cover - a bad file on disk
+                _log.debug("face detection failed for %s: %s", path, exc)
+            # Recorded either way -- "checked, nothing found" is what keeps a
+            # photograph of a sunset from being redecoded on every backfill
+            # pass for the rest of the library's life.
+            self.library.set_face_anchor(file_id, anchor)
+        return len(pending)
+
+    async def backfill_face_anchors_async(self, limit: int = 25) -> int:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._pool, self.backfill_face_anchors, limit)
 
     def resolve_location(self, lat: float | None, lon: float | None) -> str | None:
         """One lookup, for the picture that is about to go on screen."""

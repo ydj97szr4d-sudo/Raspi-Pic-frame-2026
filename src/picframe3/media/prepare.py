@@ -163,8 +163,15 @@ def open_oriented(path: str, *, target: tuple[int, int] | None = None,
     return img
 
 
-def _fit_cover(img: Image.Image, size: tuple[int, int]) -> Image.Image:
-    return ImageOps.fit(img, size, method=Image.LANCZOS, centering=(0.5, 0.42))
+#: Where a "cover" crop is centred when there is no face anchor to go by:
+#: slightly above the geometric middle, because a person's face in a typical
+#: photograph sits a little higher than dead centre.
+DEFAULT_COVER_CENTERING = (0.5, 0.42)
+
+
+def _fit_cover(img: Image.Image, size: tuple[int, int],
+               centering: tuple[float, float] = DEFAULT_COVER_CENTERING) -> Image.Image:
+    return ImageOps.fit(img, size, method=Image.LANCZOS, centering=centering)
 
 
 def _fit_contain(img: Image.Image, size: tuple[int, int],
@@ -292,7 +299,16 @@ def prepare(
     elif fit == "blur":
         out = _fit_blur(src, target, opts)
     else:
-        out = _fit_cover(src, target)
+        # A face anchor only applies to a single, un-paired photo: it was
+        # found in that photo's own coordinates, and pair_portraits() above
+        # has already merged two pictures into one canvas those coordinates
+        # no longer describe -- checked by the original ``metas``, since
+        # ``loaded`` is always one image by this point, merged or not.
+        centering = DEFAULT_COVER_CENTERING
+        if len(metas) == 1 and metas[0].face_anchor:
+            fx, fy = metas[0].face_anchor
+            centering = (min(1.0, max(0.0, fx)), min(1.0, max(0.0, fy)))
+        out = _fit_cover(src, target, centering)
 
     # Say, on the record, how this picture was laid out.  "Why was that one
     # cropped?" is the single most common question about a frame, and the

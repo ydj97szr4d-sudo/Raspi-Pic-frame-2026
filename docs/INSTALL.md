@@ -410,6 +410,16 @@ raise `viewer.upscale_limit` if you would rather it enlarged.
 (`picframe3 doctor` prints the same command with the path your frame is
 actually running from.)
 
+**Cropped photos cut off faces** — turn on `viewer.detect_faces` in the
+settings page, then install OpenCV so it can actually find them:
+`~/.local/share/picframe3/venv/bin/pip install opencv-python-headless`
+(or `picframe3[faces]` from a source checkout). It only looks for *where* a
+face-shaped region is, never *whose* — nothing is identified or kept beyond
+one crop point per photograph. Detection runs a few photographs at a time in
+the background, the same way reverse-geocoding backfills a library, so a
+large collection catches up over a few minutes rather than all at once;
+`picframe3 doctor` says how many pictures are still waiting for a look.
+
 **Photographs have stopped arriving over Syncthing** — `picframe3 sync` says
 where it stands: installed, running, which folder it keeps, who it is paired
 with and whether anything is waiting to be accepted. `picframe3 sync on`

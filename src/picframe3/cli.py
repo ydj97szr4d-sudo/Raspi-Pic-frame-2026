@@ -401,6 +401,16 @@ def cmd_doctor(args) -> int:
         check("HEIC/HEIF support", False, "not installed",
               f"{_install_hint('heif')}   (needed for iPhone photos)")
 
+    from .media import face as face_module
+
+    if not config.viewer.detect_faces:
+        check("face-aware cropping", True, "off (viewer.detect_faces)")
+    elif face_module.available():
+        check("face-aware cropping", True, "OpenCV found")
+    else:
+        check("face-aware cropping", False, "turned on, but OpenCV is not installed",
+              f"{_install_hint('faces')}   (or it just stays off)")
+
     from .media import video
 
     if video.available():
@@ -436,6 +446,11 @@ def cmd_doctor(args) -> int:
               f"{stats['files']} files, {stats['db_bytes'] // 1024} KiB at {stats['db_path']}")
         if stats["files"] == 0:
             print("     → run: picframe3 scan")
+        elif config.viewer.detect_faces and face_module.available():
+            pending = library.count_faces_missing()
+            if pending:
+                print(f"     → {pending} photo(s) still waiting on a face search; "
+                      "it runs a few at a time while the frame is on")
         library.close()
     except Exception as exc:
         ok &= check("photo index", False, str(exc))

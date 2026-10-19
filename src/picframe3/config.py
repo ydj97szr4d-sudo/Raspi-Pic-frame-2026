@@ -93,6 +93,13 @@ class SlideshowConfig:
 @dataclass
 class ViewerConfig:
     fit: str = "auto"                     # auto | cover | contain | blur | mat
+    #: Detect faces (not whose -- just where) so a "cover" crop keeps the
+    #: whole face, with hair, on screen instead of cropping to a fixed point
+    #: that happens to cut through a forehead on a tall portrait. Needs
+    #: OpenCV (the picframe3[faces] extra); harmlessly off without it. Runs
+    #: once per photograph, in the background, the same way reverse-geocoding
+    #: does -- not on every slide.
+    detect_faces: bool = False
     #: What ``fit: auto`` may do with a picture whose shape does not match the
     #: panel.  One name treats every such picture the same; several means "pick
     #: one of these", chosen from the file path so a given photograph always
