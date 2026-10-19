@@ -990,6 +990,19 @@ def _state_places(c) -> str:
     return " · ".join(bits)
 
 
+def _state_wifi(c) -> str:
+    """What the network watchdog is set to do — from the configuration
+    alone, the same restraint ``_state_sync`` explains above: the card's own
+    panel is what actually asks the frame which network it is on right now
+    and what else is in range, once it is open."""
+    n = c.network
+    if not n.enabled:
+        return "Not watched — open this to see or change the network"
+    bits = ["Watching the link"]
+    bits.append("mends itself" if n.repair else "reports only, never mends")
+    return " · ".join(bits)
+
+
 def _state_ha(c) -> str:
     m = c.mqtt
     if not m.enabled:
@@ -1132,6 +1145,14 @@ JOBS = [
      "section": "mqtt", "state": _state_ha,
      "fields": ["mqtt.enabled", "mqtt.host", "mqtt.username", "mqtt.password",
                 "mqtt.device_name"]},
+    {"name": "wifi", "kicker": "Wi-Fi", "title": "Which network the frame is on",
+     "section": "network", "state": _state_wifi,
+     # Deliberately no network.target/interface here, same reasoning as
+     # sync.enabled above: the card's own panel shows the current SSID and
+     # signal, and a list of what else is in range, and is the one place
+     # meant for actually switching networks — a plain checkbox next to
+     # it for the same thing would just be a second, quieter way in.
+     "fields": ["network.enabled", "network.repair"]},
     {"name": "buttons", "kicker": "Buttons", "title": "Touch, keys and GPIO",
      "section": "input", "state": _state_buttons,
      "fields": ["input.touch", "input.keyboard", "input.mouse",

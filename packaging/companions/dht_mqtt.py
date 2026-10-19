@@ -31,7 +31,32 @@ OUTDOOR_MAX_AGE = 30 * 60   # seconds; older than this -> fall back to OpenWeath
 TM_REPORT_MAX_AGE = 3 * 60 * 60   # seconds; older than this -> treat as "no data from
                                    # the Mac" (asleep, off, or the launchd job stopped),
                                    # same idea as OUTDOOR_MAX_AGE above
+WIFI_MAX_AGE = 2 * 60   # seconds; older than this -> hide the Wi-Fi line rather than
+                        # show a reading that may no longer be true. PicFrame3 itself
+                        # publishes its state roughly every 5s, so this only trips if
+                        # the frame's own process (or the broker) has actually stopped.
 INTERVAL = 10            # seconds between DHT reads
+
+
+def _picframe_state_topic():
+    """PicFrame3's own MQTT state topic, "<topic_prefix>/<device_id>/state"
+    (default "picframe/picframe/state" -- see control/mqtt.py's MqttBridge),
+    read once at startup from the same config.yaml this script already
+    reads everything else from. mqtt.topic_prefix/device_id aren't treated
+    as "live" settings anywhere else in picframe3 either -- changing them
+    needs a restart, since they're also baked into Home Assistant discovery
+    payloads -- so reading them once here rather than on every call matches
+    that."""
+    prefix, device_id = "picframe", "picframe"
+    try:
+        with open(_cfg_path, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        mqtt_cfg = cfg.get("mqtt") or {}
+        prefix = mqtt_cfg.get("topic_prefix", prefix)
+        device_id = mqtt_cfg.get("device_id", device_id)
+    except OSError:
+        pass
+    return f"{prefix}/{device_id}/state"
 WEATHER_INTERVAL = 600   # seconds between weather fetches (10 min)
 
 EXTRA_FILE = os.path.expanduser("~/clock_extra.txt")
@@ -604,6 +629,28 @@ def _wifi_icon(size, linked, rgba):
     return img
 
 
+def _signal_bars_icon(size, percent, rgba):
+    """Four signal bars, like a phone's status bar, filled up to `percent`
+    (0-100) of the Pi's own Wi-Fi link -- a separate glyph from _wifi_icon()
+    above, which actually means "is the outdoor Pico W sensor's data
+    fresh", not the Pi's own radio."""
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    bars = 4
+    filled = max(0, min(bars, math.ceil((percent or 0) / 100 * bars)))
+    gap = max(1, round(size * 0.08))
+    bar_w = (size - gap * (bars - 1)) / bars
+    dim = (*rgba[:3], max(40, round(rgba[3] * 0.3))) if len(rgba) == 4 else rgba
+    for i in range(bars):
+        h = size * (i + 1) / bars
+        x0 = i * (bar_w + gap)
+        x1 = x0 + bar_w
+        y1 = size
+        y0 = size - h
+        d.rectangle([x0, y0, x1, y1], fill=(rgba if i < filled else dim))
+    return img
+
+
 def _tm_status_text(tm):
     """The Time Machine line's text, from the last report relayed over MQTT
     by mac_timemachine_status.py. `tm` is the module-level tm_backup dict."""
@@ -626,15 +673,17 @@ def _tm_status_text(tm):
 
 def write_status(canvas):
     """Composites the status strip onto `canvas`, on its own translucent
-    panel, if status.enabled. First line -- a Wi-Fi glyph plus whether the
-    outdoor Pico W is still being heard from, using the exact same freshness
-    check (OUTDOOR_MAX_AGE) the main loop already uses to decide whether to
-    fall back to OpenWeather, so this always agrees with what's actually
-    driving the outdoor reading. Second line -- the Time Machine backup
-    state relayed from the Mac, shown only once something has actually been
-    heard from it (and hidden again if it goes quiet for TM_REPORT_MAX_AGE,
-    same idea as the Wi-Fi line), so a frame with no Mac script configured
-    still shows just the one line, unchanged."""
+    panel, if status.enabled. Rows, in order: whether the outdoor Pico W is
+    still being heard from (same freshness check, OUTDOOR_MAX_AGE, the main
+    loop already uses to decide whether to fall back to OpenWeather, so this
+    always agrees with what's actually driving the outdoor reading); the
+    Pi's own Wi-Fi SSID and signal strength, relayed from picframe3's own
+    MQTT state topic (see STATE_TOPIC / on_message below), shown only once
+    something has actually been heard from it and hidden again if that goes
+    quiet for WIFI_MAX_AGE; and the Time Machine backup state relayed from
+    the Mac, same "hide if stale/never heard from" treatment. A frame with
+    neither Wi-Fi reporting nor a Mac script configured still shows just the
+    one "Out sensor" line, unchanged."""
     settings = load_status_settings()
     if not settings["enabled"]:
         return
@@ -653,35 +702,54 @@ def write_status(canvas):
 
     linked = (outdoor["temp"] is not None
              and time.monotonic() - outdoor["time"] <= OUTDOOR_MAX_AGE)
-    line1 = f"Out sensor {'OK' if linked else 'down'}"
+
+    show_wifi = (wifi["ssid"] is not None
+                and time.monotonic() - wifi["time"] <= WIFI_MAX_AGE)
+    wifi_percent = wifi["signal_percent"] if show_wifi else None
 
     show_tm = (tm_backup["status"] is not None
               and time.monotonic() - tm_backup["time"] <= TM_REPORT_MAX_AGE)
-    line2 = _tm_status_text(tm_backup) if show_tm else None
 
+    # Each row as (icon_kind, text); icon_kind picks which helper draws that
+    # row's glyph once the real icon size (line_h) is known below. Keeping
+    # this a plain list, rather than the previous hardcoded line1/line2, is
+    # what lets a third row (or a frame with no Mac script, or no Wi-Fi
+    # report yet) fit without special-casing every combination.
     text_alpha = max(0, min(255, round(255 * text_opacity)))
+    icon_rgba = (*text_color, text_alpha)
+    rows = [("linked", f"Out sensor {'OK' if linked else 'down'}")]
+    if show_wifi:
+        wifi_text = wifi["ssid"]
+        if wifi_percent is not None:
+            wifi_text += f"  {round(wifi_percent)}%"
+        rows.append(("signal", wifi_text))
+    if show_tm:
+        rows.append((None, _tm_status_text(tm_backup)))
+
     probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
     ascent, descent = status_font.getmetrics()
     line_h = ascent + descent
-    w1 = int(probe.textlength(line1, font=status_font))
-    w2 = int(probe.textlength(line2, font=status_font)) if line2 else 0
-
     icon_size = line_h
     icon_gap = max(4, round(size * 0.3))
-    icon = _wifi_icon(icon_size, linked, (*text_color, text_alpha))
-
     row_gap = max(2, round(size * 0.3))
     text_x = icon_size + icon_gap
-    content_w = max(text_x + w1, text_x + w2)
-    content_h = line_h + (row_gap + line_h if line2 else 0)
+
+    content_w = 0
+    for _, text in rows:
+        text_w = int(probe.textlength(text, font=status_font))
+        content_w = max(content_w, text_x + text_w)
+    content_h = line_h * len(rows) + row_gap * (len(rows) - 1)
 
     content = Image.new("RGBA", (content_w, content_h), (0, 0, 0, 0))
     cdraw = ImageDraw.Draw(content)
-    content.alpha_composite(icon, (0, 0))
-    cdraw.text((text_x, 0), line1, font=status_font, fill=(*text_color, text_alpha))
-    if line2:
-        cdraw.text((text_x, line_h + row_gap), line2, font=status_font,
-                   fill=(*text_color, text_alpha))
+    for i, (icon_kind, text) in enumerate(rows):
+        y = i * (line_h + row_gap)
+        if icon_kind == "linked":
+            content.alpha_composite(_wifi_icon(icon_size, linked, icon_rgba), (0, y))
+        elif icon_kind == "signal":
+            content.alpha_composite(
+                _signal_bars_icon(icon_size, wifi_percent, icon_rgba), (0, y))
+        cdraw.text((text_x, y), text, font=status_font, fill=(*text_color, text_alpha))
 
     pad = max(6, round(size * _PANEL_PAD_FRAC))
     widget = _wrap_in_panel(content, pad, bg_color, bg_opacity)
@@ -912,6 +980,11 @@ pm10 = {"value": None, "time": 0.0}                  # last reading from the PMS
 # (asleep, off, launchd job stopped) even if "status" is stuck on a stale "ok".
 tm_backup = {"status": None, "age_h": None, "percent": None,
             "gb_done": None, "gb_total": None, "time": 0.0}
+# The Pi's own Wi-Fi, relayed from picframe3's own MQTT state topic (see
+# STATE_TOPIC below) rather than read from /proc or `iw` directly here --
+# picframe3's network.py (NetworkWatch) already does that polling and
+# publishes the result, so this just listens for it.
+wifi = {"ssid": None, "signal_percent": None, "online": None, "time": 0.0}
 PM25_MAX_AGE = 5 * 60   # seconds; older than this -> treat as "no reading"
 
 # CPCB (Indian) AQI breakpoints: (conc_lo, conc_hi, aqi_lo, aqi_hi).
@@ -953,8 +1026,24 @@ def on_connect(client, userdata, flags, reason_code, properties):
     client.subscribe(TOPIC_TM_PERCENT)
     client.subscribe(TOPIC_TM_GB_DONE)
     client.subscribe(TOPIC_TM_GB_TOTAL)
+    client.subscribe(STATE_TOPIC)
 
 def on_message(client, userdata, msg):
+    if msg.topic == STATE_TOPIC:
+        # PicFrame3's own retained state payload -- a JSON object, not a
+        # bare number, so this has to be handled before the float parse
+        # below (which would otherwise just reject it and return).
+        try:
+            state = json.loads(msg.payload.decode())
+        except (ValueError, UnicodeDecodeError):
+            return
+        network = state.get("network") or {}
+        if "ssid" in network:
+            wifi["ssid"] = network.get("ssid")
+            wifi["signal_percent"] = network.get("signal_percent")
+            wifi["online"] = network.get("online")
+            wifi["time"] = time.monotonic()
+        return
     if msg.topic == TOPIC_TM_STATUS:
         # A word, not a number -- handled before the float parse below, which
         # would otherwise reject it and silently drop every message.
@@ -990,6 +1079,8 @@ def on_message(client, userdata, msg):
     elif msg.topic == TOPIC_TM_GB_TOTAL and value >= 0:
         tm_backup["gb_total"] = value
         tm_backup["time"] = time.monotonic()
+
+STATE_TOPIC = _picframe_state_topic()
 
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 client.on_connect = on_connect

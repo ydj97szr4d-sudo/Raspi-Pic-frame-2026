@@ -38,6 +38,12 @@ rule shipped in ``packaging/`` grants the frame's own user exactly these two
 verbs -- which is why the service can keep ``NoNewPrivileges=yes`` and why
 there is no ``sudo`` anywhere in this file.  Where the rule is not installed the
 commands simply fail, and the watchdog goes on reporting without repairing.
+
+``wifi_scan`` and ``wifi_connect`` below are a separate, deliberate step up
+from watching: they let somebody on the web UI point the frame at a
+*different* network, not just keep it on the one it already has. The same
+polkit rule grants the extra verb that needs (adding a connection profile,
+not only activating one), so this still runs as the frame's own user.
 """
 
 from __future__ import annotations
@@ -45,6 +51,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import socket
 import struct
 import time
@@ -239,6 +246,101 @@ async def link_details(iface: str) -> dict[str, Any]:
             details["band"] = ("6 GHz" if freq >= 5925 else
                                "5 GHz" if freq >= 4900 else "2.4 GHz")
     return details
+
+
+#: nmcli's "-t" (terse) output separates fields with ":" and escapes a literal
+#: colon inside a value as "\:" -- a plain split(":") would wrongly treat a
+#: security string like "WPA2 802.1X" as fine but something like a hidden
+#: SSID containing ":" as an extra field, so the split below only breaks on a
+#: colon that is not preceded by a backslash.
+_UNESCAPED_COLON = re.compile(r"(?<!\\):")
+
+
+async def wifi_scan(iface: str = "") -> list[dict[str, Any]]:
+    """Networks the frame's radio can currently see, strongest first.
+
+    Uses ``nmcli`` rather than parsing ``iwlist`` or talking to wpa_supplicant
+    directly: it is already a hard requirement for :func:`NetworkWatch`'s own
+    repair step, and ``--rescan yes`` asks it to scan again right now rather
+    than hand back whatever it last saw, which may be minutes old and from a
+    phone that has since left the house.
+
+    One row per SSID -- the same access point is usually seen on more than
+    one channel/band, and showing it twice would just be confusing to tap --
+    keeping whichever reading had the stronger signal. A hidden network (no
+    SSID broadcast) is dropped: there is nothing on the card for somebody to
+    recognise or tap.  Best-effort throughout: no ``nmcli``, or a scan that
+    fails outright, is an empty list, not an error -- the same shape as
+    "no signal to report" everywhere else in this module.
+    """
+    text = await _output("nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY,IN-USE",
+                          "dev", "wifi", "list", "--rescan", "yes", timeout=20.0)
+    if not text:
+        return []
+    best: dict[str, dict[str, Any]] = {}
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        parts = _UNESCAPED_COLON.split(line)
+        if len(parts) < 4:
+            continue
+        ssid = parts[0].replace("\\:", ":").strip()
+        if not ssid:
+            continue
+        try:
+            signal = int(parts[1])
+        except ValueError:
+            signal = 0
+        security = parts[2].replace("\\:", ":").strip()
+        in_use = parts[3].strip() == "*"
+        existing = best.get(ssid)
+        if existing is not None and existing["signal_percent"] >= signal \
+                and not in_use:
+            continue
+        best[ssid] = {
+            "ssid": ssid,
+            "signal_percent": signal,
+            "secured": bool(security) and security != "--",
+            "in_use": in_use,
+        }
+    return sorted(best.values(),
+                  key=lambda r: (not r["in_use"], -r["signal_percent"]))
+
+
+async def wifi_connect(ssid: str, password: str = "", iface: str = ""
+                        ) -> tuple[bool, str]:
+    """Point the frame at a different Wi-Fi network.
+
+    ``nmcli device wifi connect`` both creates the saved connection profile
+    and activates it in one step -- which is why the polkit rule grants a
+    settings-modify verb alongside network-control, not just the latter.
+    An empty password tries an open network; nmcli itself refuses a password
+    offered to an open network or a missing one against a secured network,
+    and that message is handed back as-is rather than guessed at here, since
+    it is usually clearer than anything this function could invent.
+    """
+    ssid = ssid.strip()
+    if not ssid:
+        return False, "No network given."
+    argv = ["nmcli", "device", "wifi", "connect", ssid]
+    if password:
+        argv += ["password", password]
+    if iface:
+        argv += ["ifname", iface]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+    except OSError as exc:
+        return False, str(exc)
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=45.0)
+    except TimeoutError:
+        proc.kill()
+        return False, "Timed out waiting for the connection."
+    text = (out or b"").decode("utf-8", "replace").strip()
+    if proc.returncode == 0:
+        return True, text or f"Connected to {ssid}."
+    return False, text or f"Could not connect to {ssid}."
 
 
 async def ping(host: str, *, timeout: float = 3.0, count: int = 2) -> bool | None:

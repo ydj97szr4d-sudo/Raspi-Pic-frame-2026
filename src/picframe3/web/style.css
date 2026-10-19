@@ -521,18 +521,24 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin-top: 6px; }
   background: var(--input-bg); color: var(--text);
   border: 1px solid var(--line); font: inherit; font-size: 13px;
 }
-.sync-head {
+.sync-head, .wifi-head {
   font-size: 10.5px; font-weight: 600; letter-spacing: .1em;
   text-transform: uppercase; color: var(--muted);
   margin-top: 16px !important; margin-bottom: 6px !important;
 }
-.sync-row, .sync-id {
+.sync-row, .sync-id, .wifi-row {
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
   padding: 6px 0; border-top: 1px solid var(--line);
 }
-.sync-row .muted, .sync-id .muted { font-size: 12.5px; }
-.sync-row .btn, .sync-id .btn { margin-left: auto; padding: 4px 9px; font-size: 12.5px; }
-.sync-error { color: var(--danger); font-size: 12.5px; }
+.sync-row .muted, .sync-id .muted, .wifi-row .muted { font-size: 12.5px; }
+.sync-row .btn, .sync-id .btn, .wifi-row .btn { margin-left: auto; padding: 4px 9px; font-size: 12.5px; }
+.sync-error, .wifi-error { color: var(--danger); font-size: 12.5px; }
+.wifi-row.is-current { border-top-color: var(--accent, var(--line)); }
+.wifi-row input[type="password"] {
+  flex: 1 1 160px; min-width: 0; padding: 6px 9px;
+  background: var(--input-bg); color: var(--text);
+  border: 1px solid var(--line); font: inherit; font-size: 12.5px;
+}
 
 /* ---- settings: the full list ---- */
 .form { display: grid; gap: 12px; align-items: start;

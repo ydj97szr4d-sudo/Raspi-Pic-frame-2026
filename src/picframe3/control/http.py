@@ -705,6 +705,35 @@ class HttpServer:
                 raise HTTPException(400, str(exc)) from exc
             return await _in_thread(sync_module.status, self.app.config)
 
+        # -- wifi --------------------------------------------------------
+        # Separate from the network watchdog above: that section reports on
+        # and mends the link the frame already has. This is the one place it
+        # can be told to join a *different* network outright -- useful the
+        # day the router gets renamed, or the frame moves to a new room on a
+        # different access point.
+        @api.get("/api/network/wifi", dependencies=guard)
+        async def wifi_list():
+            from .. import network as network_module
+
+            iface = self.app.config.network.interface or \
+                self.app.network.snapshot().get("interface", "")
+            networks = await network_module.wifi_scan(iface)
+            return {"current": self.app.network.snapshot(), "networks": networks}
+
+        @api.post("/api/network/wifi/connect", dependencies=guard)
+        async def wifi_connect_to(body: dict | None = None):
+            from .. import network as network_module
+
+            payload = body or {}
+            ssid = str(payload.get("ssid") or "")
+            password = str(payload.get("password") or "")
+            iface = self.app.config.network.interface or \
+                self.app.network.snapshot().get("interface", "")
+            ok, message = await network_module.wifi_connect(ssid, password, iface)
+            if not ok:
+                raise HTTPException(400, message)
+            return {"ok": True, "message": message}
+
         # -- library ---------------------------------------------------
         # Everything below reads SQLite, so everything below reads it in a
         # worker thread: a library of forty thousand photographs is several

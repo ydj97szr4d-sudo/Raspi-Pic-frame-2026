@@ -518,6 +518,12 @@ def cmd_doctor(args) -> int:
             if config.network.repair:
                 check("may mend its own connection", *_repair_permission())
 
+    # Independent of the watchdog above (network.enabled) -- the settings
+    # page can offer to join a different Wi-Fi network regardless of whether
+    # the frame is also watching its current one.
+    check("may join a different Wi-Fi from the settings page",
+          *_wifi_connect_permission())
+
     # -- the Shutdown button
     #
     # Powering the Pi off needs a polkit rule in the same way mending the
@@ -681,6 +687,39 @@ def _repair_permission() -> tuple[bool, str, str]:
     return (False, "polkit is not available, so the rule is never read",
             "install polkitd and NetworkManager, or set network.repair: false "
             "so the frame reports outages without trying to mend them.")
+
+
+def _wifi_connect_permission() -> tuple[bool, str, str]:
+    """Can the frame join a *different* Wi-Fi network from the web UI?
+
+    A separate check from ``_repair_permission`` above: that one is about
+    reconnecting or restarting what is already configured, while this one is
+    about ``nmcli device wifi connect`` saving a brand new connection profile,
+    which needs an extra polkit action
+    (``org.freedesktop.NetworkManager.settings.modify.system``). A frame set
+    up before that action was added to ``50-picframe3-network.rules`` has the
+    older, narrower rule file on disk -- present, but missing the one line
+    this needs -- which is why the file's own content is checked here rather
+    than only whether it exists.
+    """
+    rule = "/etc/polkit-1/rules.d/50-picframe3-network.rules"
+    action = "org.freedesktop.NetworkManager.settings.modify.system"
+    try:
+        with open(rule, encoding="utf-8") as fh:
+            has_action_line = action in fh.read()
+    except OSError:
+        has_action_line = False
+    have_polkit = _polkit_knows(action)
+
+    if has_action_line and have_polkit:
+        return True, "polkit rule installed and polkit knows the action", ""
+    if not has_action_line:
+        return (False, "polkit rule missing or out of date",
+                "run 'picframe3 setup' again to refresh "
+                f"{rule} with the newer rule that includes this action.")
+    return (False, "polkit is not available, so the rule is never read",
+            "install polkitd and NetworkManager to switch networks from here; "
+            "nmcli at the command line still works without it.")
 
 
 def cmd_config(args) -> int:

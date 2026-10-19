@@ -1,13 +1,19 @@
-// Lets the picture frame mend its own network connection -- and nothing else.
+// Lets the picture frame mend its own network connection, and switch itself
+// onto a different one from its own settings page -- and nothing else.
 //
 // The frame watches whether it can still reach the default gateway, and after
 // several failed checks in a row reconnects the wireless device, or restarts
-// NetworkManager if that was not enough.  Both of those normally want root.
-// Rather than giving the frame sudo (which its systemd unit forbids anyway,
-// with NoNewPrivileges=yes), this grants its user exactly two verbs:
+// NetworkManager if that was not enough.  It can also be told, from its web
+// UI, to join a different Wi-Fi network outright.  All of that normally wants
+// root.  Rather than giving the frame sudo (which its systemd unit forbids
+// anyway, with NoNewPrivileges=yes), this grants its user exactly three verbs:
 //
-//   * NetworkManager's own network-control action -- "reconnect this device",
-//     the same permission a desktop user has over their own Wi-Fi;
+//   * NetworkManager's own network-control action -- "reconnect this device"
+//     or "activate this connection", the same permission a desktop user has
+//     over their own Wi-Fi;
+//   * NetworkManager's settings-modify action -- needed because joining a new
+//     network (nmcli device wifi connect) also saves a connection profile for
+//     it, not just activates one that already exists;
 //   * start/stop/restart on NetworkManager.service, and no other unit.
 //
 // Anything else -- another service, another machine, another user -- falls
@@ -18,6 +24,9 @@ polkit.addRule(function (action, subject) {
         return undefined;
     }
     if (action.id === "org.freedesktop.NetworkManager.network-control") {
+        return polkit.Result.YES;
+    }
+    if (action.id === "org.freedesktop.NetworkManager.settings.modify.system") {
         return polkit.Result.YES;
     }
     if (action.id === "org.freedesktop.systemd1.manage-units" &&

@@ -947,17 +947,23 @@ function stopSyncPolling() {
 function drawSheetExtra(job) {
   const box = $("#sheet-extra");
   stopSyncPolling();
-  if (!job || job.name !== "sync") {
+  stopWifiPolling();
+  if (!job || (job.name !== "sync" && job.name !== "wifi")) {
     box.hidden = true;
     box.innerHTML = "";
     return;
   }
   box.hidden = false;
-  box.innerHTML = `<div class="panel"><p class="muted">Asking Syncthing…</p></div>`;
-  refreshSync();
-  // While something is being installed the answer changes underneath us, so
-  // the panel keeps asking for as long as it is on screen.
-  syncTimer = setInterval(refreshSync, 4000);
+  if (job.name === "sync") {
+    box.innerHTML = `<div class="panel"><p class="muted">Asking Syncthing…</p></div>`;
+    refreshSync();
+    // While something is being installed the answer changes underneath us,
+    // so the panel keeps asking for as long as it is on screen.
+    syncTimer = setInterval(refreshSync, 4000);
+    return;
+  }
+  box.innerHTML = `<div class="panel"><p class="muted">Looking for networks…</p></div>`;
+  refreshWifi();
 }
 
 async function refreshSync() {
@@ -1092,6 +1098,126 @@ async function syncAction(el) {
   // The card behind the sheet summarises the settings, and switching
   // Syncthing on changed one of them.
   try { SCHEMA = await api("/api/config/schema"); drawJobs(); } catch (e) {}
+}
+
+
+/* ---- Wi-Fi ---------------------------------------------------------------
+   The one job that is about joining a *different* network, not about a
+   setting — which is why, like Syncthing above, it carries a panel that
+   asks the frame directly rather than a form bound to the config file.
+   Scanning is deliberately not on a timer the way Syncthing's status is:
+   `nmcli --rescan yes` is a real radio scan, not a free read, so this only
+   asks again when the sheet is opened or the person taps Rescan. */
+function stopWifiPolling() {
+  // Nothing to clear — there is no timer, only the one-shot scan above —
+  // this exists so drawSheetExtra can treat Syncthing and Wi-Fi the same way
+  // when a different job's sheet is opened.
+}
+
+async function refreshWifi() {
+  if (openJob !== "wifi") return;
+  try {
+    drawWifi(await api("/api/network/wifi"));
+  } catch (err) {
+    $("#sheet-extra").innerHTML =
+      `<div class="panel"><p class="muted">The frame could not be asked about ` +
+      `its Wi-Fi just now.</p></div>`;
+  }
+}
+
+function drawWifi(s) {
+  const box = $("#sheet-extra");
+  const rows = [];
+  const current = s.current || {};
+  const networks = s.networks || [];
+
+  if (current.ssid) {
+    const bits = [`${Math.round(current.signal_percent ?? 0)}%`];
+    if (current.status) bits.push(current.status);
+    rows.push(`<p><strong>Connected to ${escapeHtml(current.ssid)}</strong>
+      <span class="muted">· ${escapeHtml(bits.join(" · "))}</span></p>`);
+  } else if (current.online === false) {
+    rows.push(`<p><strong>Not connected.</strong></p>`);
+  } else {
+    rows.push(`<p class="muted">The frame's current network is not being
+      watched, so its name is not shown here — but it can still join a
+      different one below.</p>`);
+  }
+  rows.push(`<p><button class="btn" data-wifi="rescan" type="button">Rescan</button></p>`);
+
+  if (!networks.length) {
+    rows.push(`<p class="muted">No networks found yet.</p>`);
+  } else {
+    rows.push(`<p class="wifi-head">Networks in range</p>` + networks.map((n) => {
+      const isCurrent = n.in_use;
+      const open = !n.secured;
+      return `<div class="wifi-row${isCurrent ? " is-current" : ""}">
+        <strong>${escapeHtml(n.ssid)}</strong>
+        <span class="muted">${Math.round(n.signal_percent)}%${open ? "" : " · secured"}</span>
+        ${isCurrent ? `<span class="muted">this network</span>` :
+          `<button class="btn" data-wifi="join" data-ssid="${escapeHtml(n.ssid)}"
+             data-open="${open ? "1" : ""}" type="button">Join</button>`}
+      </div>`;
+    }).join(""));
+  }
+
+  if (s.error) {
+    rows.push(`<p class="wifi-error">${escapeHtml(s.error)}</p>`);
+  }
+  box.innerHTML = `<div class="panel">${rows.join("")}</div>`;
+  box.querySelectorAll("[data-wifi]").forEach((el) => {
+    el.onclick = () => wifiAction(el);
+  });
+}
+
+function wifiAction(el) {
+  const what = el.dataset.wifi;
+  if (what === "rescan") {
+    el.disabled = true;
+    el.textContent = "Looking…";
+    refreshWifi();
+    return;
+  }
+  if (what === "join") {
+    const ssid = el.dataset.ssid;
+    const open = el.dataset.open === "1";
+    if (open) {
+      wifiConnect(ssid, "", el);
+      return;
+    }
+    // A secured network needs a password first — turn this row's button
+    // into a small inline form rather than opening yet another dialog.
+    const row = el.closest(".wifi-row");
+    row.insertAdjacentHTML("beforeend",
+      `<input type="password" placeholder="Wi-Fi password" autocomplete="off">
+       <button class="btn btn-primary" data-wifi="confirm"
+               data-ssid="${escapeHtml(ssid)}" type="button">Connect</button>`);
+    el.remove();
+    row.querySelectorAll("[data-wifi]").forEach((b) => { b.onclick = () => wifiAction(b); });
+    row.querySelector("input")?.focus();
+    return;
+  }
+  if (what === "confirm") {
+    const row = el.closest(".wifi-row");
+    const password = row.querySelector("input[type=password]")?.value || "";
+    wifiConnect(el.dataset.ssid, password, el);
+  }
+}
+
+async function wifiConnect(ssid, password, el) {
+  el.disabled = true;
+  const label = el.textContent;
+  el.textContent = "Connecting…";
+  try {
+    await api("/api/network/wifi/connect", {
+      method: "POST", body: JSON.stringify({ ssid, password }) });
+  } catch (err) {
+    el.textContent = "Could not join";
+    setTimeout(() => { if (openJob === "wifi") refreshWifi(); }, 2500);
+    return;
+  }
+  if (openJob !== "wifi") return;
+  await refreshWifi();
 }
 
 function optionList(name) {
