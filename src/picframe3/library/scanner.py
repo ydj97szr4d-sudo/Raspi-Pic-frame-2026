@@ -418,18 +418,18 @@ class Scanner:
             return 0
         pending = self.library.faces_missing(limit)
         for file_id, path in pending:
-            anchor = None
+            box = None
             try:
                 img = open_oriented(path, target=(640, 640))
                 if img is not None:
-                    anchor = face_module.detect_anchor(img)
+                    box = face_module.detect_face_box(img)
                     img.close()
             except Exception as exc:  # pragma: no cover - a bad file on disk
                 _log.debug("face detection failed for %s: %s", path, exc)
             # Recorded either way -- "checked, nothing found" is what keeps a
             # photograph of a sunset from being redecoded on every backfill
             # pass for the rest of the library's life.
-            self.library.set_face_anchor(file_id, anchor)
+            self.library.set_face_box(file_id, box)
         return len(pending)
 
     async def backfill_face_anchors_async(self, limit: int = 25) -> int:

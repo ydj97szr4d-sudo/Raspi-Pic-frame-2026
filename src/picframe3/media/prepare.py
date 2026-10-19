@@ -174,6 +174,36 @@ def _fit_cover(img: Image.Image, size: tuple[int, int],
     return ImageOps.fit(img, size, method=Image.LANCZOS, centering=centering)
 
 
+def _cover_crop_box(img_size: tuple[int, int], target_size: tuple[int, int],
+                    centering: tuple[float, float]) -> tuple[float, float, float, float]:
+    """The region of the image a "cover" crop keeps, for this centering.
+
+    Mirrors ``PIL.ImageOps.fit``'s own box arithmetic (with its ``bleed``
+    left at 0) rather than calling it and inspecting the result, because
+    this is used to ask a question *before* any pixels are touched: would
+    this centering cut into a given region at all? Returned as
+    ``(left, top, right, bottom)``, each a 0..1 fraction of the image.
+    """
+    w, h = img_size
+    tw, th = target_size
+    if w <= 0 or h <= 0 or tw <= 0 or th <= 0:
+        return (0.0, 0.0, 1.0, 1.0)
+    if w / h >= tw / th:
+        crop_w, crop_h = (tw / th) * h, float(h)
+    else:
+        crop_w, crop_h = float(w), w / (tw / th)
+    left = (w - crop_w) * centering[0]
+    top = (h - crop_h) * centering[1]
+    return (left / w, top / h, (left + crop_w) / w, (top + crop_h) / h)
+
+
+def _contains(outer: tuple[float, float, float, float],
+             inner: tuple[float, float, float, float]) -> bool:
+    ox0, oy0, ox1, oy1 = outer
+    ix0, iy0, ix1, iy1 = inner
+    return ox0 <= ix0 and oy0 <= iy0 and ox1 >= ix1 and oy1 >= iy1
+
+
 def _fit_contain(img: Image.Image, size: tuple[int, int],
                  background: tuple[int, int, int]) -> Image.Image:
     canvas = Image.new("RGB", size, background)
@@ -299,15 +329,25 @@ def prepare(
     elif fit == "blur":
         out = _fit_blur(src, target, opts)
     else:
-        # A face anchor only applies to a single, un-paired photo: it was
-        # found in that photo's own coordinates, and pair_portraits() above
-        # has already merged two pictures into one canvas those coordinates
-        # no longer describe -- checked by the original ``metas``, since
+        # A face box only applies to a single, un-paired photo: it was found
+        # in that photo's own coordinates, and pair_portraits() above has
+        # already merged two pictures into one canvas those coordinates no
+        # longer describe -- checked by the original ``metas``, since
         # ``loaded`` is always one image by this point, merged or not.
         centering = DEFAULT_COVER_CENTERING
-        if len(metas) == 1 and metas[0].face_anchor:
-            fx, fy = metas[0].face_anchor
-            centering = (min(1.0, max(0.0, fx)), min(1.0, max(0.0, fy)))
+        face_box = metas[0].face_box if len(metas) == 1 else None
+        if face_box is not None:
+            default_crop = _cover_crop_box(src.size, target, DEFAULT_COVER_CENTERING)
+            if not _contains(default_crop, face_box):
+                # Only moved when the ordinary crop would actually have cut
+                # into the face -- a face that already sits well inside that
+                # crop (e.g. high up but with plenty of margin) is left
+                # alone, rather than re-centring the photo on it for no
+                # reason and cropping more off some other edge than the
+                # fixed centering ever needed to.
+                fx0, fy0, fx1, fy1 = face_box
+                fx, fy = (fx0 + fx1) / 2.0, (fy0 + fy1) / 2.0
+                centering = (min(1.0, max(0.0, fx)), min(1.0, max(0.0, fy)))
         out = _fit_cover(src, target, centering)
 
     # Say, on the record, how this picture was laid out.  "Why was that one

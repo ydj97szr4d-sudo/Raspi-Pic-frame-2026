@@ -1,24 +1,29 @@
 """Finds where a face is in a photograph, so cropping can keep it on screen.
 
 Detection only -- this answers *where in the picture a head-shaped region is*,
-never *whose*.  It keeps nothing beyond the one anchor point written back to
-the index (``library.db.Library.set_face_anchor``), and the image never
-leaves the frame or touches the network: this is OpenCV's bundled Haar
-cascade (``haarcascade_frontalface_default.xml``), the same detector OpenCV
-has shipped for twenty years, with no model download and no per-person data
-of any kind, ever computed.
+never *whose*.  It keeps nothing beyond the one bounding box written back to
+the index (``library.db.Library.set_face_box``), and the image never leaves
+the frame or touches the network: this is OpenCV's bundled Haar cascade
+(``haarcascade_frontalface_default.xml``), the same detector OpenCV has
+shipped for twenty years, with no model download and no per-person data of
+any kind, ever computed.
+
+The box, not just its centre, is what is kept: ``media.prepare`` needs the
+whole thing to tell whether a face was ever actually at risk of being cropped
+out before it bothers moving the crop away from its ordinary fixed centring
+-- a face already well inside where that crop would land should not change
+anything about how the rest of the photograph is framed.
 
 Cost is paid once per photograph, at scan time (see
 ``library.scanner.Scanner.backfill_face_anchors``), not on every slide -- a
 cascade pass over a full-resolution holiday photo is not something to repeat
 every few minutes forever, so the result is cached in the index and read back
-from there when the picture is actually cropped for the screen (see
-``media.prepare._fit_cover``).
+from there when the picture is actually cropped for the screen.
 
 Needs ``opencv-python-headless`` (the ``picframe3[faces]`` extra). Without it,
-:func:`available` is False and :func:`detect_anchor` always returns ``None``
--- the frame falls back to the fixed centering it always used, rather than
-failing to start.
+:func:`available` is False and :func:`detect_face_box` always returns
+``None`` -- the frame falls back to the fixed centering it always used,
+rather than failing to start.
 """
 
 from __future__ import annotations
@@ -79,18 +84,18 @@ def _resolve():
     return _cascade
 
 
-def detect_anchor(image) -> tuple[float, float] | None:
-    """Where a crop should be centred to keep every face (and its hair) in.
+def detect_face_box(image) -> tuple[float, float, float, float] | None:
+    """The region a crop must not cut into, to keep every face (and hair) in.
 
-    ``image`` is a PIL image, already EXIF-oriented.  Returns an
-    ``(x, y)`` pair, each a 0..1 fraction of the image -- the same shape
-    ``PIL.ImageOps.fit``'s ``centering`` argument takes -- or ``None`` when no
-    face was found, when OpenCV is not installed, or when the faces found
-    already span too much of the photo for an anchor to change anything.
+    ``image`` is a PIL image, already EXIF-oriented.  Returns
+    ``(x0, y0, x1, y1)``, each a 0..1 fraction of the image, covering every
+    face found (padded generously for hair) -- or ``None`` when no face was
+    found, when OpenCV is not installed, or when the faces found already span
+    too much of the photo for a box to mean anything.
 
     Never raises: a photograph OpenCV cannot read (an odd colour mode, a
-    truly enormous scan) just does not get a face anchor, same as a photo
-    with nobody in it.
+    truly enormous scan) just does not get a face box, same as a photo with
+    nobody in it.
     """
     cascade = _resolve()
     if cascade is None:
@@ -129,7 +134,7 @@ def detect_anchor(image) -> tuple[float, float] | None:
 
         if (x1 - x0) > _MAX_SPAN or (y1 - y0) > _MAX_SPAN:
             return None
-        return ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+        return (x0, y0, x1, y1)
     except Exception as exc:  # pragma: no cover - defensive
         _log.debug("face detection failed: %s", exc)
         return None
