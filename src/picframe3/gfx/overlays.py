@@ -83,6 +83,7 @@ def info_bar(
     panel_min_width_pct: float = 0.0,
     position: str = "",
     offset_pct: tuple[float, float] = (3.0, 3.0),
+    pair_bottom_margin: int = 0,
 ) -> Placement | None:
     """Caption block, normally anchored to the bottom of the screen over a
     gradient -- unless ``position`` says otherwise (see below).
@@ -112,6 +113,14 @@ def info_bar(
     to the unpaired case: a portrait pair's two captions keep the full-width
     bottom band regardless, since "a corner" does not make sense split across
     two side-by-side pictures.
+
+    ``pair_bottom_margin`` (0 by default -- flush with the bottom edge, as
+    before this existed) lifts that full-width band clear of the very bottom
+    of the screen, for a pair only. It exists because the band's position
+    cannot be moved to a corner the way a single caption's can: something
+    else anchored to the bottom of the screen -- a weather or status overlay
+    composited on top of this one, outside picframe3 entirely -- has no other
+    way to stay clear of it once two portraits are paired.
     """
     columns = _as_columns(lines)
     joiner = DEFAULT_SEPARATOR if separator is None else separator
@@ -168,7 +177,8 @@ def info_bar(
                 x = style.margin_x
         layer.alpha_composite(body, (max(0, min(x, w - body.width)),
                                      (band_h - body.height) // 2))
-    return Placement(layer, 0, h - band_h)
+    lift = max(0, pair_bottom_margin) if paired else 0
+    return Placement(layer, 0, max(0, h - band_h - lift))
 
 
 def _panel_wrap(content: Image.Image, pad: int | tuple[int, int], color: tuple[int, int, int],

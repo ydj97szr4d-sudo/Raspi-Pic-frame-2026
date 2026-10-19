@@ -132,6 +132,7 @@ NOTES = {
     "viewer.text_opacity": "0–1.",
     "viewer.text_margin_x": "Gap from the side of the screen to the caption.",
     "viewer.text_margin_y": "Gap above and below the caption inside its band.",
+    "viewer.pair_text_bottom_margin": "Lift a portrait pair's caption band this many pixels clear of the very bottom of the screen. A pair's captions always span the full width at the bottom (text_position does not apply to them), which can land on top of anything else anchored to the bottom edge — a weather or status overlay from a companion script, say. 0 leaves it flush with the edge, as before.",
     "viewer.text_scrim": "Darkening behind the caption so it stays legible over a bright picture. 0–1.",
     "viewer.text_panel_opacity": "A rounded panel behind the caption text, sized to the text itself rather than the full width (unlike the darkening above) — the same look the calendar/clock/status overlay widgets have. 0 (default) draws no panel; the two can be used together.",
     "viewer.text_panel_color": "Red, green, blue, 0–255.",

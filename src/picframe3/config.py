@@ -153,6 +153,15 @@ class ViewerConfig:
     text_opacity: float = 1.0
     text_margin_x: int = 64
     text_margin_y: int = 36
+    #: Lift a portrait pair's caption band this many pixels clear of the very
+    #: bottom edge of the screen. A pair's two captions always draw as one
+    #: full-width band at the bottom regardless of text_position (see
+    #: gfx.overlays.info_bar's docstring for why), which otherwise lands
+    #: right on top of anything else anchored to the bottom of the screen --
+    #: a weather or status overlay from a companion script, say. 0 (the
+    #: original behaviour) leaves it flush with the bottom edge, same as a
+    #: single photo's caption.
+    pair_text_bottom_margin: int = 0
     text_scrim: float = 0.5
     #: A rounded translucent panel behind the caption text, sized to the text
     #: itself rather than the full width (unlike text_scrim's gradient band

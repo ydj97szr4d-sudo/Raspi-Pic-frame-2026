@@ -778,6 +778,7 @@ class PicFrame:
             panel_min_width_pct=self.config.viewer.text_panel_min_width_pct,
             position=self.config.viewer.text_position,
             offset_pct=tuple(self.config.viewer.text_offset_pct),
+            pair_bottom_margin=self.config.viewer.pair_text_bottom_margin,
         )
         if placement is None:
             self.renderer.set_overlay("info", None)
