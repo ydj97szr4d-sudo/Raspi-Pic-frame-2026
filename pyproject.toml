@@ -83,8 +83,8 @@ dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.5", "httpx>=0.27"]
 picframe3 = "picframe3.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/sapnho/Digital-Picture-Frame-Pi-2026"
-Issues = "https://github.com/sapnho/Digital-Picture-Frame-Pi-2026/issues"
+Homepage = "https://github.com/ydj97szr4d-sudo/Raspi-Pic-frame-2026"
+Issues = "https://github.com/ydj97szr4d-sudo/Raspi-Pic-frame-2026/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/picframe3"]

