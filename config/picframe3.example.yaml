@@ -81,6 +81,17 @@ slideshow:
   # end, however long it is — a video is never cut short by the picture
   # interval.
   video_max_seconds: 0.0
+  # gstreamer decodes into the frame's own renderer, so crossfades, Ken
+  # Burns and overlays keep working over video — but every frame costs a
+  # Python-side copy and a GL upload, which on some boards is slow enough to
+  # be visibly choppy regardless of resolution. vlc hands the whole screen
+  # to VLC's own direct-to-display output for the clip, which is smooth at
+  # any resolution but blanks out every overlay and transition for as long
+  # as the clip plays: no crossfade in or out, no clock or weather line, no
+  # Ken Burns. Needs cvlc or vlc installed, and falls back to gstreamer on
+  # its own if that is missing or the display backend cannot hand off
+  # control.
+  video_engine: gstreamer
   kenburns: false         # Slow pan and zoom across each picture.
   kenburns_zoom: 1.12     # How far in the pan starts, e.g. 1.12 = 12% larger than the screen.
   # Which transitions transition: random may draw from. None ticked means
@@ -92,6 +103,15 @@ viewer:
   # How a picture is placed on the screen. auto decides by shape and is what
   # most frames want.
   fit: auto
+  # When a picture is cropped to fill the screen, move the crop only if the
+  # ordinary fixed one would have cut into a face -- a face already well
+  # clear of the crop is left as it was. Detection only -- it finds where a
+  # face-shaped region is, never whose. Needs OpenCV installed (pip install
+  # picframe3[faces]); harmlessly ignored without it. Runs once per
+  # photograph in the background over the next few minutes, not on every
+  # slide, so a large library catches up gradually rather than stalling the
+  # frame.
+  detect_faces: false
   # What fit: auto may do with a picture whose shape does not match the
   # panel. Several means "pick one of these", chosen from the file path so a
   # given photograph always looks the same. A picture that already matches
@@ -151,6 +171,13 @@ viewer:
   text_opacity: 1.0       # 0–1. (advanced)
   text_margin_x: 64       # Gap from the side of the screen to the caption. (advanced)
   text_margin_y: 36       # Gap above and below the caption inside its band. (advanced)
+  # Lift a portrait pair's caption band this many pixels clear of the very
+  # bottom of the screen. A pair's captions always span the full width at
+  # the bottom (text_position does not apply to them), which can land on top
+  # of anything else anchored to the bottom edge — a weather or status
+  # overlay from a companion script, say. 0 leaves it flush with the edge,
+  # as before.
+  pair_text_bottom_margin: 0
   # Darkening behind the caption so it stays legible over a bright picture.
   # 0–1.
   text_scrim: 0.5
@@ -242,6 +269,11 @@ library:
   # trash: that deletes the files and keeps the lines about them. (restart)
   # (advanced)
   deleted_folder: ~/.local/share/picframe3/deleted
+  # Where the library grid's rotate/crop editor keeps a picture's original
+  # the moment before its first edit, so “Undo edit” has something to put
+  # back. Edited again without undoing in between, no second backup is made
+  # -- there is nowhere further back than the original. (restart) (advanced)
+  edit_backup_folder: ~/.local/share/picframe3/edit-originals
   # Show only pictures whose path contains this. Pick one of your folders,
   # or type any part of a path. Empty shows everything.
   subfolder: ''
@@ -375,6 +407,22 @@ http:
   # A request arriving under some other name is refused, which is what stops
   # a web page from using your browser as a way in. (restart) (advanced)
   allowed_hosts: []
+  # Path to a PEM certificate. Both this and tls_key must be set to turn
+  # https:// on — picframe3 enable-https writes a self-signed pair here for
+  # you. Either blank falls back to plain http://. (restart) (advanced)
+  tls_cert: ''
+  # Path to the matching PEM private key. Both this and tls_cert must be set
+  # to turn https:// on. (restart) (advanced)
+  tls_key: ''
+
+# How this web page itself looks -- font and accent colour.
+appearance:
+  # A CSS font-family value, e.g. Arial, sans-serif or Georgia, serif. Blank
+  # keeps the page's own built-in typeface.
+  font: Arial, sans-serif
+  # Red, green, blue, 0–255 — replaces the colour used for links, buttons
+  # and highlights across the page. Empty keeps the built-in accent.
+  accent_color: [37, 99, 235]
 
 # Keyboard, touchscreen, mouse and GPIO buttons.
 input:
@@ -515,6 +563,10 @@ calendar:
   # weekday-header row and the first week, and between each week after that.
   # 0 packs the rows at their natural height.
   grid_row_gap: 0
+  # How many pixels smaller the “today” highlight square is than its grid
+  # cell, per side. 0 fills the cell edge to edge; a larger number leaves a
+  # visible gap around the mark.
+  square_padding: 1
   # Red, green, blue, 0–255. The date text, weekday headers and day numbers.
   text_color: [255, 255, 255]
   text_opacity: 0.9       # 0–1.
@@ -565,3 +617,19 @@ status:
   background_color: [0, 0, 0]
   # 0 (no panel at all) – 1 (solid panel).
   background_opacity: 0.35
+
+# The small animated maker's mark in a corner of the screen.
+brand:
+  enabled: true           # Off removes the mark entirely. (restart)
+  position: BR            # Which corner it's inset from. (restart)
+  # Inset from that corner, percent of screen width/height — [x, y].
+  # (restart)
+  offset_pct: [3.0, 3.0]
+  size: 160               # Size of the mark, in real screen pixels (its longer side). (restart)
+  opacity: 0.9            # 0 (invisible) – 1 (fully opaque), applied to the whole mark. (restart)
+  # On: it runs its forming/dissolving animation. Off: a plain static mark,
+  # no motion. (restart)
+  animated: true
+  # Which cycles are in rotation -- one is picked at random each time the
+  # previous one finishes. Empty means every style. (restart)
+  styles: [dots, scanline, pop, glitch, focus]

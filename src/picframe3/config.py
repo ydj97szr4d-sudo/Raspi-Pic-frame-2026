@@ -562,6 +562,11 @@ class CalendarConfig:
     #: and between each week after that. 0 packs the rows at their natural
     #: (font-driven) height, with no added gap.
     grid_row_gap: int = 0
+    #: How many pixels smaller the "today" highlight square is than its
+    #: grid cell, per side -- 0 fills the cell edge to edge, a larger
+    #: number leaves a visible gap around the mark instead of it touching
+    #: the cell's own boundary.
+    square_padding: int = 1
     #: Red, green, blue, 0-255. The date text, weekday headers and day
     #: numbers.
     text_color: list[int] = field(default_factory=lambda: [255, 255, 255])

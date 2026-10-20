@@ -50,6 +50,7 @@ Pacing and sequencing: how long each picture stays, how it changes, what comes n
 | `video_loop` | boolean | `False` | Repeat a short video until the picture interval is up, instead of moving on when it ends. |
 | `video_mute` | boolean | `True` | Videos are silent by default; a frame on a shelf that suddenly talks is startling. |
 | `video_max_seconds` | number | `0.0` | Cut every video off after this many seconds. 0 plays each one to the end, however long it is — a video is never cut short by the picture interval. |
+| `video_engine` | string | `'gstreamer'` | `gstreamer` decodes into the frame's own renderer, so crossfades, Ken Burns and overlays keep working over video — but every frame costs a Python-side copy and a GL upload, which on some boards is slow enough to be visibly choppy regardless of resolution. `vlc` hands the whole screen to VLC's own direct-to-display output for the clip, which is smooth at any resolution but blanks out every overlay and transition for as long as the clip plays: no crossfade in or out, no clock or weather line, no Ken Burns. Needs `cvlc` or `vlc` installed, and falls back to `gstreamer` on its own if that is missing or the display backend cannot hand off control. |
 | `kenburns` | boolean | `False` | Slow pan and zoom across each picture. |
 | `kenburns_zoom` | number | `1.12` | How far in the pan starts, e.g. 1.12 = 12% larger than the screen. |
 | `transition_choices` | list of strings | `[]` | Which transitions `transition: random` may draw from. None ticked means the standard pool. |
@@ -61,6 +62,7 @@ How a picture is composed on screen, and what is written over it.
 | key | type | default | |
 |---|---|---|---|
 | `fit` | string | `'auto'` | How a picture is placed on the screen. `auto` decides by shape and is what most frames want. |
+| `detect_faces` | boolean | `False` | When a picture is cropped to fill the screen, move the crop only if the ordinary fixed one would have cut into a face -- a face already well clear of the crop is left as it was. Detection only -- it finds where a face-shaped region is, never whose. Needs OpenCV installed (`pip install picframe3[faces]`); harmlessly ignored without it. Runs once per photograph in the background over the next few minutes, not on every slide, so a large library catches up gradually rather than stalling the frame. |
 | `fit_choices` | list of strings | `['mat']` | What `fit: auto` may do with a picture whose shape does not match the panel. Several means "pick one of these", chosen from the file path so a given photograph always looks the same. A picture that already matches the panel is shown edge to edge regardless, because that crops nothing. |
 | `blur_amount` | number | `20.0` | Radius of the blurred backdrop behind a letterboxed picture. |
 | `blur_zoom` | number | `1.06` | How far the blurred backdrop is enlarged, so its edges are off screen. *(advanced)* |
@@ -87,6 +89,7 @@ How a picture is composed on screen, and what is written over it.
 | `text_opacity` | number | `1.0` | 0–1. *(advanced)* |
 | `text_margin_x` | integer | `64` | Gap from the side of the screen to the caption. *(advanced)* |
 | `text_margin_y` | integer | `36` | Gap above and below the caption inside its band. *(advanced)* |
+| `pair_text_bottom_margin` | integer | `0` | Lift a portrait pair's caption band this many pixels clear of the very bottom of the screen. A pair's captions always span the full width at the bottom (text_position does not apply to them), which can land on top of anything else anchored to the bottom edge — a weather or status overlay from a companion script, say. 0 leaves it flush with the edge, as before. |
 | `text_scrim` | number | `0.5` | Darkening behind the caption so it stays legible over a bright picture. 0–1. |
 | `text_panel_opacity` | number | `0.0` | A rounded panel behind the caption text, sized to the text itself rather than the full width (unlike the darkening above) — the same look the calendar/clock/status overlay widgets have. 0 (default) draws no panel; the two can be used together. |
 | `text_panel_color` | list of integers | `[0, 0, 0]` | Red, green, blue, 0–255. |
@@ -124,6 +127,7 @@ Where the photographs are and how they are indexed.
 | `rescan_interval` | number | `3600.0` | Full walk as a backstop behind inotify, in seconds. 0 disables it. *(takes effect on restart)* |
 | `scan_on_start` | boolean | `True` | Index at startup. Off is faster to start but new files wait for the watch. *(takes effect on restart)* |
 | `deleted_folder` | string | `'~/.local/share/picframe3/deleted'` | Where “Remove” moves a picture. Every removal is written to removals.jsonl in this folder — when it went, where it came from, and what it was. A removed picture also stays out of the slideshow if the file turns up again, under any name, from a sync or a backup; the Removed tab says when that has happened and is where you let it back in. That tab reads the journal, can put a picture back, and can empty the trash: that deletes the files and keeps the lines about them. *(takes effect on restart)* *(advanced)* |
+| `edit_backup_folder` | string | `'~/.local/share/picframe3/edit-originals'` | Where the library grid's rotate/crop editor keeps a picture's original the moment before its first edit, so “Undo edit” has something to put back. Edited again without undoing in between, no second backup is made -- there is nowhere further back than the original. *(takes effect on restart)* *(advanced)* |
 | `subfolder` | string | *(empty)* | Show only pictures whose path contains this. Pick one of your folders, or type any part of a path. Empty shows everything. |
 | `prune_max_fraction` | number | `0.2` | How much of the index one scan may drop, as a fraction. A picture folder on a stick or a share is briefly absent now and then, and every file under it then looks deleted — this is what stops that from throwing away the play history and the place names. 0 removes the safeguard. *(takes effect on restart)* *(advanced)* |
 
@@ -192,6 +196,17 @@ The web interface and REST API.
 | `allow_delete` | boolean | `True` | Let the Remove button — and Home Assistant's *Remove current picture* — move pictures out of the library. Off refuses both, and a picture can then only be removed at the frame itself, with a button or a key. Nothing is ever unlinked either way: “remove” means moved to the deleted folder, and the Removed tab can put it back. *(takes effect on restart)* |
 | `cors_origins` | list of strings | `[]` | Named sites that may call this API from a browser, e.g. `https://ha.example.com`. Anything listed here can do everything this page can do — skip pictures, change settings, remove photographs — on behalf of anyone who visits it while on your network. Leave it empty unless you are embedding the API somewhere. `*` is refused: it would grant that to every site on the web. *(takes effect on restart)* *(advanced)* |
 | `allowed_hosts` | list of strings | `[]` | Extra names this frame answers to. It already answers to `localhost`, to its own hostname and to any address on your own network; add a name here only if you reach it through a reverse proxy or an unusual local domain. A request arriving under some other name is refused, which is what stops a web page from using your browser as a way in. *(takes effect on restart)* *(advanced)* |
+| `tls_cert` | string | *(empty)* | Path to a PEM certificate. Both this and tls_key must be set to turn https:// on — `picframe3 enable-https` writes a self-signed pair here for you. Either blank falls back to plain http://. *(takes effect on restart)* *(advanced)* |
+| `tls_key` | string | *(empty)* | Path to the matching PEM private key. Both this and tls_cert must be set to turn https:// on. *(takes effect on restart)* *(advanced)* |
+
+## `appearance`
+
+How this web page itself looks -- font and accent colour.
+
+| key | type | default | |
+|---|---|---|---|
+| `font` | string | `'Arial, sans-serif'` | A CSS font-family value, e.g. `Arial, sans-serif` or `Georgia, serif`. Blank keeps the page's own built-in typeface. |
+| `accent_color` | list of integers | `[37, 99, 235]` | Red, green, blue, 0–255 — replaces the colour used for links, buttons and highlights across the page. Empty keeps the built-in accent. |
 
 ## `input`
 
@@ -300,6 +315,7 @@ The upper-left calendar widget: today's date and a small month grid.
 | `size` | integer | `34` | Size of the “today” line (e.g. “Saturday, 17 October”), in real screen pixels (drawn directly at your screen's own resolution, not through PicFrame3's scaled renderer). |
 | `grid_size` | integer | `20` | Size of the month grid's day numbers and weekday-header row (M T W T F S S), in real screen pixels — independent of the “today” line size above. |
 | `grid_row_gap` | integer | `0` | Extra vertical space (px) between every row of the grid — between the weekday-header row and the first week, and between each week after that. 0 packs the rows at their natural height. |
+| `square_padding` | integer | `1` | How many pixels smaller the “today” highlight square is than its grid cell, per side. 0 fills the cell edge to edge; a larger number leaves a visible gap around the mark. |
 | `text_color` | list of integers | `[255, 255, 255]` | Red, green, blue, 0–255. The date text, weekday headers and day numbers. |
 | `text_opacity` | number | `0.9` | 0–1. |
 | `background_color` | list of integers | `[0, 0, 0]` | Red, green, blue, 0–255. The panel drawn behind the whole widget, so the text stays legible over a busy photograph. |
@@ -338,4 +354,18 @@ A small status strip -- outdoor sensor link, and more to come.
 | `text_opacity` | number | `0.9` | 0–1. |
 | `background_color` | list of integers | `[0, 0, 0]` | Red, green, blue, 0–255. The panel drawn behind the strip. |
 | `background_opacity` | number | `0.35` | 0 (no panel at all) – 1 (solid panel). |
+
+## `brand`
+
+The small animated maker's mark in a corner of the screen.
+
+| key | type | default | |
+|---|---|---|---|
+| `enabled` | boolean | `True` | Off removes the mark entirely. *(takes effect on restart)* |
+| `position` | string | `'BR'` | Which corner it's inset from. *(takes effect on restart)* |
+| `offset_pct` | list of numbers | `[3.0, 3.0]` | Inset from that corner, percent of screen width/height — [x, y]. *(takes effect on restart)* |
+| `size` | integer | `160` | Size of the mark, in real screen pixels (its longer side). *(takes effect on restart)* |
+| `opacity` | number | `0.9` | 0 (invisible) – 1 (fully opaque), applied to the whole mark. *(takes effect on restart)* |
+| `animated` | boolean | `True` | On: it runs its forming/dissolving animation. Off: a plain static mark, no motion. *(takes effect on restart)* |
+| `styles` | list of strings | `['dots', 'scanline', 'pop', 'glitch', 'focus']` | Which cycles are in rotation -- one is picked at random each time the previous one finishes. Empty means every style. *(takes effect on restart)* |
 

@@ -168,6 +168,7 @@ DEFAULT_CALENDAR_SETTINGS = {
     "size": 34,
     "grid_size": 20,
     "grid_row_gap": 0,
+    "square_padding": 1,
     "text_color": [255, 255, 255],
     "text_opacity": 0.9,
     "background_color": [0, 0, 0],
@@ -259,7 +260,7 @@ def _contrast_text(rgb):
 
 
 def _calendar_widget_image(today, font_path, size, grid_size, grid_row_gap,
-                           text_color, text_opacity, holiday_color):
+                           square_padding, text_color, text_opacity, holiday_color):
     """Today's date/day-name, and a small month grid below it with today
     highlighted. One RGBA image, sized to its own content -- the caller
     places it, so this knows nothing about screen position or the
@@ -276,7 +277,9 @@ def _calendar_widget_image(today, font_path, size, grid_size, grid_row_gap,
     highlight is a sharp-edged square, always drawn solid in text_color
     (at full strength, so it stands out as a highlight rather than fading
     with the rest), with its own day-number switched to black or white
-    for contrast against it."""
+    for contrast against it. square_padding shrinks that square by this
+    many pixels on every side, so it reads as a mark inside its cell rather
+    than a tile that fills it edge to edge."""
     try:
         date_font = ImageFont.truetype(font_path, size)
         grid_font = ImageFont.truetype(font_path, grid_size)
@@ -378,10 +381,9 @@ def _calendar_widget_image(today, font_path, size, grid_size, grid_row_gap,
 
     # The "today" highlight is a sharp-edged square (not stretched into a
     # rectangle even when columns are wider than tall), sized to the
-    # smaller of the two and centred within its own column/row. A couple
-    # of pixels less inset than before, so it reads as a solid mark rather
-    # than a small dot.
-    highlight_d = min(cell_w, cell_h) - 2
+    # smaller of the two and centred within its own column/row.
+    # square_padding is per side, so it comes off twice.
+    highlight_d = max(1, min(cell_w, cell_h) - 2 * square_padding)
 
     for row, week in enumerate(weeks):
         for col, day in enumerate(week):
@@ -485,6 +487,7 @@ def write_calendar(canvas):
     size = int(settings["size"])
     grid_size = int(settings["grid_size"])
     grid_row_gap = int(settings["grid_row_gap"])
+    square_padding = int(settings.get("square_padding", 1))
     text_color = tuple(int(v) for v in settings["text_color"])
     text_opacity = max(0.0, min(1.0, float(settings["text_opacity"])))
     bg_color = tuple(int(v) for v in settings["background_color"])
@@ -492,7 +495,8 @@ def write_calendar(canvas):
     holiday_color = HOLIDAY_PALETTE.get(settings["holiday_color"], HOLIDAY_PALETTE["dull_red"])
 
     content = _calendar_widget_image(datetime.date.today(), FONT_PATH, size, grid_size,
-                                      grid_row_gap, text_color, text_opacity, holiday_color)
+                                      grid_row_gap, square_padding, text_color, text_opacity,
+                                      holiday_color)
 
     pad = max(6, round(size * _PANEL_PAD_FRAC))
     widget = _wrap_in_panel(content, pad, bg_color, bg_opacity)

@@ -91,6 +91,24 @@
 
   <!-- ------------------------------------------------------ Library -->
   <section id="view-library" class="view">
+    <!-- What the frame is actually showing right now, so a rotate or a
+         remove doesn't mean switching back to Now Playing first. Hidden
+         when nothing is on the wall yet. -->
+    <section class="now-mini" id="library-now" hidden>
+      <div class="now-mini-thumb">
+        <img id="now-mini-img" alt="">
+        <span class="badge" id="now-mini-badge" hidden>video</span>
+      </div>
+      <div class="now-mini-info">
+        <span class="kicker">On the frame now</span>
+        <strong id="now-mini-title">—</strong>
+      </div>
+      <div class="now-mini-actions">
+        <button class="btn" id="now-mini-edit" type="button">Edit…</button>
+        <button class="btn btn-danger" id="now-mini-remove" type="button">Remove</button>
+      </div>
+    </section>
+
     <!-- The filter is the frame, not the browser: everything here changes
          what goes on the wall, which is why it sits above the grid and says
          so in its heading. -->

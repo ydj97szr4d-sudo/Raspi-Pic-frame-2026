@@ -416,6 +416,38 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin-top: 6px; }
   .removal .actions { grid-column: 1 / -1; }
 }
 
+/* ---- the library tab's "on the frame now" strip ----
+   A row, the same shape as a removed one, for the same reason: a thumbnail
+   beside a sentence beside the two things worth doing about it, so a rotate
+   or a remove doesn't send the person back to Now Playing first. */
+.now-mini {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--panel); border: 1px solid var(--line);
+  border-top: 2px solid var(--rule);
+  padding: 10px 14px; margin: 0 0 20px;
+}
+.now-mini-thumb {
+  position: relative; width: 56px; height: 56px; flex: 0 0 auto;
+  overflow: hidden; background: var(--stage-bg);
+}
+.now-mini-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.now-mini-thumb .badge {
+  position: absolute; bottom: 0; right: 0; font-size: 9px; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase;
+  background: #000a; color: #fff; padding: 2px 5px;
+}
+.now-mini-info { flex: 1 1 auto; min-width: 0; }
+.now-mini-info .kicker { display: block; }
+.now-mini-info strong {
+  display: block; font-size: 15px; font-weight: 700; margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.now-mini-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+@media (max-width: 560px) {
+  .now-mini { flex-wrap: wrap; }
+  .now-mini-actions { flex: 1 1 100%; }
+}
+
 /* ---- the filter panel ---- */
 .filter {
   background: var(--panel); border: 1px solid var(--line);

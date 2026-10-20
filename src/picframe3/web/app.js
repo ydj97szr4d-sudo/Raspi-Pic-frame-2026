@@ -163,6 +163,14 @@ function render(next) {
   $("#display-info").textContent = d.width
     ? `${d.width}×${d.height} · ${d.refresh_hz}Hz · ${d.backend}`
     : "";
+  // The preview box used to be a fixed 16:9 regardless of the frame's own
+  // screen -- fine for a landscape panel, but a portrait one was shown
+  // letterboxed inside a wide box with most of it empty. Matching the
+  // stage's own shape to the real display is what "the whole screen" means
+  // for a frame that isn't widescreen.
+  if (d.width && d.height) {
+    $(".stage").style.aspectRatio = `${d.width} / ${d.height}`;
+  }
 
   const cur = state.current || {};
   if (liveUrl) {
@@ -181,6 +189,8 @@ function render(next) {
     $("#preview-empty").hidden = false;
     currentId = null;
   }
+
+  updateNowMini(cur);
 
   $("#title").textContent = cur.title || cur.basename || "—";
   const bits = [];
@@ -262,6 +272,45 @@ function render(next) {
   ].map(([k, v, cls]) => `<div${cls ? ` class="${cls}"` : ""}><dt>${k}</dt><dd>${v}</dd></div>`)
     .join("");
 }
+
+/* -------------------------------------------------- "on the frame now"
+   The library tab's own small window onto whatever is on the wall, so a
+   bad rotate or a photo that doesn't belong can be fixed without a trip
+   back to Now Playing. Fed from the same state document as that tab --
+   nothing of its own to poll. */
+let nowMiniRecord = null;
+
+function updateNowMini(cur) {
+  const panel = $("#library-now");
+  if (!cur || !cur.id) {
+    panel.hidden = true;
+    nowMiniRecord = null;
+    return;
+  }
+  nowMiniRecord = cur;
+  panel.hidden = false;
+  $("#now-mini-img").src = thumbUrl(cur);
+  $("#now-mini-title").textContent = cur.title || cur.basename || "—";
+  $("#now-mini-badge").hidden = !cur.is_video;
+  // Rotate/crop only understand still photographs (see media/edit.py) --
+  // a video keeps Remove, which works on either.
+  $("#now-mini-edit").hidden = !!cur.is_video;
+}
+
+$("#now-mini-edit").addEventListener("click", () => {
+  if (nowMiniRecord) openEditor(nowMiniRecord);
+});
+$("#now-mini-remove").addEventListener("click", async () => {
+  if (!nowMiniRecord) return;
+  if (!confirm(`Remove ${nowMiniRecord.title || nowMiniRecord.basename} from the library?`)) return;
+  try {
+    await send("delete");
+  } catch (err) {
+    // Same switch #del on Now Playing respects (http.allow_delete).
+    alert("Removing pictures over the network is switched off — see Settings, " +
+          "Web interface, “Remove pictures from the network”.");
+  }
+});
 
 /* How the Pi itself is doing.  Every reading is optional: a machine that
    cannot measure its own temperature shows no temperature tile rather than a
