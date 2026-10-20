@@ -1852,6 +1852,8 @@ class PicFrame:
             },
             health=self.health.snapshot(),
             network=self.network.snapshot(),
+            appearance={"font": self.config.appearance.font,
+                       "accent_color": list(self.config.appearance.accent_color)},
             version=__version__,
             uptime=round(now - self.started, 1),
             fps=round(self._fps, 2),

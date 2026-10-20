@@ -50,6 +50,7 @@ SECTION_PROSE = {
     "clock": "A custom-drawn clock with its own translucent panel.",
     "status": "A small status strip -- outdoor sensor link, and more to come.",
     "brand": "The small animated maker's mark in a corner of the screen.",
+    "appearance": "How this web page itself looks -- font and accent colour.",
 }
 
 SECTION_LABELS = {
@@ -73,6 +74,7 @@ SECTION_LABELS = {
     "clock": "Clock widget",
     "status": "Status strip",
     "brand": "Brand mark",
+    "appearance": "Appearance",
 }
 
 # --------------------------------------------------------------------------
@@ -206,6 +208,8 @@ NOTES = {
     "http.cors_origins": "Named sites that may call this API from a browser, e.g. `https://ha.example.com`. Anything listed here can do everything this page can do — skip pictures, change settings, remove photographs — on behalf of anyone who visits it while on your network. Leave it empty unless you are embedding the API somewhere. `*` is refused: it would grant that to every site on the web.",
     "http.tls_cert": "Path to a PEM certificate. Both this and tls_key must be set to turn https:// on — `picframe3 enable-https` writes a self-signed pair here for you. Either blank falls back to plain http://.",
     "http.tls_key": "Path to the matching PEM private key. Both this and tls_cert must be set to turn https:// on.",
+    "appearance.font": "A CSS font-family value, e.g. `Arial, sans-serif` or `Georgia, serif`. Blank keeps the page's own built-in typeface.",
+    "appearance.accent_color": "Red, green, blue, 0–255 — replaces the colour used for links, buttons and highlights across the page. Empty keeps the built-in accent.",
     "input.keyboard": "A keyboard plugged into the Pi, read straight from evdev.",
     "input.touch": "A touchscreen: tap right half for next, left for previous.",
     "input.mouse": "Off by default; a stray mouse should not skip pictures.",
@@ -319,6 +323,8 @@ LABELS = {
     "http.allowed_hosts": "Extra names the frame answers to",
     "http.tls_cert": "TLS certificate path",
     "http.tls_key": "TLS private key path",
+    "appearance.font": "Font",
+    "appearance.accent_color": "Accent colour",
     "library.prune_max_fraction": "Most of the index one scan may drop",
     "gpio_pull_up": "GPIO pull-up",
     "gpio_buttons": "GPIO buttons",
@@ -554,7 +560,7 @@ def redact(data: dict) -> dict:
 #: so rather than leaving the owner to wonder why nothing happened.
 LIVE_SECTIONS = {"viewer", "slideshow", "geo", "power", "health", "network",
                  "sync", "motion", "video_proxy", "overlay", "calendar",
-                 "clock", "status"}
+                 "clock", "status", "appearance"}
 LIVE_KEYS = {
     "display.brightness", "display.rotate", "display.background",
     "library.subfolder", "logging.level",
@@ -1119,6 +1125,18 @@ def _state_brand(c) -> str:
     return f"{b.position}, {_n(x)}%/{_n(y)}% inset · {b.size}px · {motion} · {_ratio(b.opacity)} opacity"
 
 
+def _state_appearance(c) -> str:
+    a = c.appearance
+    bits = []
+    bits.append(f"font {a.font!r}" if a.font else "built-in font")
+    if a.accent_color:
+        r, g, b_ = (list(a.accent_color) + [0, 0, 0])[:3]
+        bits.append(f"accent rgb({r},{g},{b_})")
+    else:
+        bits.append("built-in accent")
+    return " · ".join(bits)
+
+
 #: The caption elements, said in as few words as a summary line can spare.
 CAPTION_SHORT = {
     "title": "Title", "caption": "Caption", "name": "File name",
@@ -1240,6 +1258,10 @@ JOBS = [
      "fields": ["brand.enabled", "brand.position", "brand.offset_pct",
                 "brand.size", "brand.opacity", "brand.animated",
                 "brand.styles"]},
+    {"name": "appearance", "kicker": "Appearance",
+     "title": "Font and accent colour of this web page",
+     "section": "appearance", "state": _state_appearance,
+     "fields": ["appearance.font", "appearance.accent_color"]},
 ]
 
 

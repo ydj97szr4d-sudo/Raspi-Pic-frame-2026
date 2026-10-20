@@ -116,9 +116,48 @@ function thumbUrl(p) {
   return `/api/library/photo/${p.id}/thumb?v=${Math.round(p.mtime || 0)}`;
 }
 
+/* ------------------------------------------------------------- appearance
+   config.appearance overrides the page's own font/accent live, straight
+   from the state stream -- no reload, no restart, since it's nothing more
+   than a couple of CSS variables on <html>. Both empty (the default)
+   leaves the page's own built-in look alone entirely. */
+let appliedAppearance = "";
+function applyAppearance(appearance) {
+  const a = appearance || {};
+  const key = JSON.stringify(a);
+  if (key === appliedAppearance) return;      // nothing changed since last tick
+  appliedAppearance = key;
+  const root = document.documentElement.style;
+
+  if (a.font) root.setProperty("--font-family", a.font);
+  else root.removeProperty("--font-family");
+
+  const rgb = a.accent_color;
+  if (Array.isArray(rgb) && rgb.length === 3) {
+    const accent = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+    // Luminance decides whether text drawn on a solid accent fill reads as
+    // white or near-black -- a blue reads white-on-top, a pale yellow does
+    // not. Hover/tint/text shades are mixed from the accent itself with
+    // color-mix() rather than picked by hand, so one colour is all the
+    // setting needs.
+    const luminance = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255;
+    root.setProperty("--accent", accent);
+    root.setProperty("--accent-hover", `color-mix(in srgb, ${accent} 85%, black)`);
+    root.setProperty("--accent-text", accent);
+    root.setProperty("--accent-ink", luminance > 0.6 ? "#1a1a1a" : "#ffffff");
+    root.setProperty("--accent-tint", `color-mix(in srgb, ${accent} 12%, var(--bg))`);
+  } else {
+    for (const prop of ["--accent", "--accent-hover", "--accent-text",
+                        "--accent-ink", "--accent-tint"]) {
+      root.removeProperty(prop);
+    }
+  }
+}
+
 /* ---------------------------------------------------------------- state */
 function render(next) {
   state = next;
+  applyAppearance(state.appearance);
   $("#live").classList.toggle("on", !!state.running);
   const d = state.display || {};
   $("#display-info").textContent = d.width

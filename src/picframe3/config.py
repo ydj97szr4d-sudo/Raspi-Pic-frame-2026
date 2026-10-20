@@ -315,6 +315,27 @@ class MqttConfig:
 
 
 @dataclass
+class AppearanceConfig:
+    """How the web interface itself looks -- the settings page, the library
+    grid, the control panel -- not the frame's own screen (that's `viewer`).
+    Defaults to Arial and a blue accent rather than the page's own built-in
+    look; blank either field (or the whole page's own look, with both
+    blank) to go back to it. Either way, a change here is live -- no
+    restart needed, since it's just a couple of CSS variables the page
+    itself applies.
+    """
+
+    #: A CSS font-family value, e.g. "Arial, sans-serif". Empty keeps the
+    #: page's own built-in typeface.
+    font: str = "Arial, sans-serif"
+    #: Red, green, blue, 0-255. Replaces the accent colour used for links,
+    #: buttons and highlights throughout the page; the hover, ink-on-accent
+    #: and tint shades the page needs alongside it are worked out from this
+    #: one colour. Empty keeps the page's own built-in accent.
+    accent_color: list[int] = field(default_factory=lambda: [37, 99, 235])
+
+
+@dataclass
 class HttpConfig:
     enabled: bool = True
     host: str = "0.0.0.0"
@@ -660,6 +681,7 @@ class Config:
     geo: GeoConfig = field(default_factory=GeoConfig)
     mqtt: MqttConfig = field(default_factory=MqttConfig)
     http: HttpConfig = field(default_factory=HttpConfig)
+    appearance: AppearanceConfig = field(default_factory=AppearanceConfig)
     input: InputConfig = field(default_factory=InputConfig)
     power: PowerConfig = field(default_factory=PowerConfig)
     health: HealthConfig = field(default_factory=HealthConfig)

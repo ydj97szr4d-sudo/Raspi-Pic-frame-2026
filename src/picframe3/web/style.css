@@ -37,6 +37,13 @@
    The palette itself is flat and near-monochrome with one red doing all the
    pointing: no gradients, no shadows, no rounded corners, hairlines between
    cells and a heavy rule where the page changes subject. */
+:root {
+  /* Overridden live by app.js from config.appearance when the owner has set
+     a font or accent colour of their own; this is the page's own default,
+     unrelated to light/dark, so it lives outside the two palette blocks. */
+  --font-family: "Archivo", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+                 Roboto, sans-serif;
+}
 :root, :root[data-theme="light"] {
   color-scheme: light;
   --bg: #f3f2f2;
@@ -127,8 +134,7 @@ html, body { margin: 0; padding: 0; }
 body {
   background: var(--bg);
   color: var(--text);
-  font: 15px/1.55 "Archivo", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-        Roboto, sans-serif;
+  font: 15px/1.55 var(--font-family);
   -webkit-font-smoothing: antialiased;
   padding-bottom: env(safe-area-inset-bottom);
 }

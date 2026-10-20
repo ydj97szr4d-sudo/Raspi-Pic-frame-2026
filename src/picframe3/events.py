@@ -142,6 +142,9 @@ class State:
     #: the power supply.  Empty when the reporting is switched off.
     health: dict[str, Any] = field(default_factory=dict)
     network: dict[str, Any] = field(default_factory=dict)
+    #: font/accent_color overrides for the web page itself (config.appearance).
+    #: Both empty is the page's own built-in look.
+    appearance: dict[str, Any] = field(default_factory=dict)
     version: str = ""
     uptime: float = 0.0
     fps: float = 0.0
