@@ -231,6 +231,14 @@ class LibraryConfig:
     rescan_interval: float = 3600.0       # belt and braces behind inotify
     scan_on_start: bool = True
     deleted_folder: str = "~/.local/share/picframe3/deleted"
+    #: Where a photo's original bytes go the moment the library grid's
+    #: editor rotates or crops it -- one copy per file, made just before the
+    #: first edit, so "Undo edit" always has something to put back. The
+    #: *second* edit to the same file without an undo in between does not
+    #: make a second backup: there is nowhere further back to go than the
+    #: original, and keeping every intermediate step would turn a stack of
+    #: ordinary crops into a slow leak of disk space.
+    edit_backup_folder: str = "~/.local/share/picframe3/edit-originals"
     subfolder: str = ""                   # live filter, changeable at runtime
     #: The largest share of the index a single scan may delete.  A picture
     #: folder on a USB stick or a network share is simply *absent* for a

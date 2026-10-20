@@ -24,10 +24,12 @@ from .gfx.textstyle import TextStyle
 from .health import Health
 from .library.db import Library, Record
 from .library.digest import file_digest
+from .library.edits import EditLog
 from .library.playlist import ANY_OTHER, ORDER_STATE_KEY, Filters, Playlist, starting_order
 from .library.removed import JOURNAL_NAME, RemovalLog
 from .library.scanner import Scanner
 from .media import PrepareOptions, SlideLoader
+from .media import edit as edit_module
 from .media import geocode as geocode_module
 from .media.geocode import Geocoder
 from .media.mat import MatStyle
@@ -219,6 +221,7 @@ class PicFrame:
 
         self.library = Library(cfg.library.database)
         self.removals = RemovalLog(cfg.library.deleted_folder)
+        self.edits = EditLog(cfg.library.edit_backup_folder)
         self.health.snapshot()   # kicks off the first reading on its own thread
         if cfg.sync.enabled:
             # Best effort, on a thread: if Syncthing is there this makes sure
@@ -1246,14 +1249,27 @@ class PicFrame:
     async def _delete_current(self, source: str = "") -> None:
         if not self.current:
             return
-        record = self.current[0]
+        if not await self._remove_record(self.current[0], source=source):
+            return
+        self.playlist.refresh()
+        self.invalidate_stats()
+        await self._advance()
+
+    async def _remove_record(self, record: Any, source: str = "") -> bool:
+        """Move one picture aside and journal it -- the whole of what "Remove"
+        does, whether it is the one on screen now (_delete_current, which
+        advances the slideshow afterwards) or one of a batch picked in the
+        library grid (bulk_remove, which does not).  Returns whether it
+        actually moved -- a caller counting how many of a batch succeeded
+        needs that, not just a log line.
+        """
         if not self.config.http.allow_delete and source in ("http", "mqtt"):
             # The switch the settings page offers, and the one the reference
             # documented, finally does something.  A key press or a GPIO button
             # is somebody standing at the frame and is never refused.
             _log.warning("refusing to remove %s: removal from the network is off",
-                         self.current[0].path)
-            return
+                         record.path)
+            return False
         target_dir = os.path.expanduser(self.config.library.deleted_folder)
         os.makedirs(target_dir, exist_ok=True)
         destination = os.path.join(target_dir, os.path.basename(record.path))
@@ -1271,7 +1287,7 @@ class PicFrame:
                 None, shutil.move, record.path, destination)
         except OSError as exc:
             _log.error("cannot move %s aside: %s", record.path, exc)
-            return
+            return False
         _log.info("moved %s to %s", record.path, destination)
         # What the picture *is*, taken at its new home -- same bytes, and the
         # old path is already gone.  This is what makes the removal stick: a
@@ -1305,9 +1321,134 @@ class PicFrame:
             # moved away is not one of them.
             await asyncio.get_running_loop().run_in_executor(
                 None, self._hold_existing_copies, digest, record.size)
-        self.playlist.refresh()
+        # Not playlist.refresh()/invalidate_stats() here -- a caller removing
+        # several at once (bulk_remove) would redo that work once per file for
+        # nothing; it refreshes once after its whole batch instead, and
+        # _delete_current's own advance() implies the same refresh for one.
+        return True
+
+    async def bulk_remove(self, ids: list[int], source: str = "") -> dict[str, Any]:
+        """Remove several pictures the library grid's "Remove selected" asks
+        for in one request, rather than one HTTP round trip per picture.
+
+        Each id is looked up and moved independently -- a stale id (the
+        picture was already removed by someone else, or a rescan dropped it
+        since the grid last loaded) is skipped rather than failing the whole
+        batch, and the response says which.
+        """
+        removed: list[int] = []
+        missing: list[int] = []
+        for file_id in ids:
+            record = self.library.get(file_id)
+            if record is None:
+                missing.append(file_id)
+                continue
+            if await self._remove_record(record, source=source):
+                removed.append(file_id)
+            else:
+                missing.append(file_id)
+        if removed:
+            self.playlist.refresh()
+            self.invalidate_stats()
+            self._dirty = True
+        return {"removed": removed, "skipped": missing}
+
+    async def edit_photo(self, file_id: int, op: str, **params: Any) -> dict[str, Any]:
+        """Rotate or crop one photograph on disk, for the library grid's
+        editor.  ``op`` is "rotate" (``degrees``, a multiple of 90) or "crop"
+        (``box``, an ``[x0, y0, x1, y1]`` fraction of the oriented picture).
+
+        The very first edit to a file backs up its original bytes first (see
+        library.edits.EditLog) so "Undo edit" has something to put back; a
+        second edit before an undo does not make a second backup, on
+        purpose -- see the module docstring there.
+        """
+        record = self.library.get(file_id)
+        if record is None:
+            return {"ok": False, "error": "that picture is not in the library"}
+        if record.is_video:
+            return {"ok": False, "error": "videos cannot be edited here"}
+        path = record.path
+        if not os.path.exists(path):
+            return {"ok": False, "error": "the file is missing on disk"}
+        loop = asyncio.get_running_loop()
+
+        if self.edits.active(path) is None:
+            backup_dir = os.path.expanduser(self.config.library.edit_backup_folder)
+            os.makedirs(backup_dir, exist_ok=True)
+            backed_up_as = os.path.basename(path)
+            n = 1
+            while os.path.exists(os.path.join(backup_dir, backed_up_as)):
+                stem, ext = os.path.splitext(os.path.basename(path))
+                backed_up_as = f"{stem}-{n}{ext}"
+                n += 1
+            try:
+                # Off the event loop: a RAW or an uncompressed TIFF is tens of
+                # megabytes, and this is a plain read-and-write of all of them.
+                await loop.run_in_executor(
+                    None, shutil.copy2, path, os.path.join(backup_dir, backed_up_as))
+            except OSError as exc:
+                return {"ok": False, "error": f"could not back up the original: {exc}"}
+            self.edits.backup(path, backed_up_as, op)
+
+        try:
+            if op == "rotate":
+                degrees = int(params.get("degrees", 90))
+                await loop.run_in_executor(None, edit_module.rotate, path, degrees)
+            elif op == "crop":
+                box = tuple(float(v) for v in params.get("box") or ())
+                if len(box) != 4:
+                    return {"ok": False, "error": "box must be [x0, y0, x1, y1]"}
+                await loop.run_in_executor(None, edit_module.crop, path, box)
+            else:
+                return {"ok": False, "error": f"unknown edit {op!r}"}
+        except edit_module.EditError as exc:
+            return {"ok": False, "error": str(exc)}
+        except (OSError, ValueError) as exc:
+            _log.error("edit (%s) failed for %s: %s", op, path, exc)
+            return {"ok": False, "error": "that edit could not be applied"}
+
+        if self.scanner is not None:
+            await loop.run_in_executor(None, self.scanner.rescan_paths, [path])
+        if self.playlist is not None:
+            self.playlist.refresh()
         self.invalidate_stats()
-        await self._advance()
+        # If this is the picture on screen right now, its metadata (size,
+        # orientation) is stale until the next slide change picks the fresh
+        # row up -- not fixed here, because rebuilding the texture for a
+        # slide already mid-transition is more machinery than a grid edit
+        # (almost never the one currently showing) is worth.
+        self._dirty = True
+        return {"ok": True, "has_backup": True}
+
+    async def undo_edit(self, file_id: int) -> dict[str, Any]:
+        """Put back the original bytes from before this file's one live
+        backup (see EditLog) -- the whole of what "Undo edit" does."""
+        record = self.library.get(file_id)
+        if record is None:
+            return {"ok": False, "error": "that picture is not in the library"}
+        entry = self.edits.active(record.path)
+        if entry is None:
+            return {"ok": False, "error": "nothing to undo"}
+        backup_dir = os.path.expanduser(self.config.library.edit_backup_folder)
+        backup_path = os.path.join(backup_dir, entry["backed_up_as"])
+        if not os.path.exists(backup_path):
+            self.edits.mark_restored(entry["backed_up_as"])
+            return {"ok": False, "error": "the backup is no longer there"}
+        try:
+            await asyncio.get_running_loop().run_in_executor(
+                None, shutil.move, backup_path, record.path)
+        except OSError as exc:
+            return {"ok": False, "error": str(exc)}
+        self.edits.mark_restored(entry["backed_up_as"])
+        if self.scanner is not None:
+            await asyncio.get_running_loop().run_in_executor(
+                None, self.scanner.rescan_paths, [record.path])
+        if self.playlist is not None:
+            self.playlist.refresh()
+        self.invalidate_stats()
+        self._dirty = True
+        return {"ok": True}
 
     async def _restore_removed(self, stored_as: str) -> dict[str, Any]:
         """Put a removed picture back where it came from.

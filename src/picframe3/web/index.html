@@ -154,11 +154,21 @@
       <label class="inline"><input id="only-selected" type="checkbox">
         Only the ones the frame is showing</label>
       <button id="rescan" class="btn">Rescan</button>
+      <button id="select-mode" class="btn" type="button">Select…</button>
     </div>
     <p id="similar-banner" class="similar-banner" hidden>
       <span class="kicker">Similar to</span>
       <strong id="similar-name"></strong>
       <button id="similar-clear" class="btn" type="button">Back to search</button>
+    </p>
+    <!-- Select mode replaces clicking a card to jump the slideshow with
+         clicking it to check it off, because the two actions are both
+         "click a card" and doing both at once would mean every tap on the
+         grid risked jumping the frame to a photo you meant to delete. -->
+    <p id="select-banner" class="select-banner" hidden>
+      <strong id="select-count">0 selected</strong>
+      <button id="select-remove" class="btn btn-danger" type="button" disabled>Remove selected</button>
+      <button id="select-cancel" class="btn" type="button">Done</button>
     </p>
     <div id="grid" class="grid"></div>
     <p id="grid-empty" class="empty" hidden>Nothing matches.</p>
@@ -292,6 +302,43 @@
       <span class="spacer"></span>
       <span class="muted note" id="sheet-note"></span>
     </div>
+  </aside>
+</div>
+
+<!-- The rotate/crop editor. Its own small modal rather than the settings
+     sheet above: a sheet is a form of fields and labels, this is a picture
+     you drag on, and forcing the two into one shape would have served
+     neither. -->
+<div class="editor-backdrop" id="editor-backdrop">
+  <aside class="editor" role="dialog" aria-modal="true" aria-labelledby="editor-title">
+    <div class="editor-head">
+      <div>
+        <span class="kicker">Edit photo</span>
+        <h2 id="editor-title">—</h2>
+      </div>
+      <button class="btn editor-close" id="editor-close" type="button">Close</button>
+    </div>
+    <div class="editor-stage-wrap">
+      <div class="editor-stage" id="editor-stage">
+        <img id="editor-img" alt="">
+        <div class="crop-box" id="crop-box" hidden>
+          <div class="crop-handle" data-corner="nw"></div>
+          <div class="crop-handle" data-corner="ne"></div>
+          <div class="crop-handle" data-corner="sw"></div>
+          <div class="crop-handle" data-corner="se"></div>
+        </div>
+      </div>
+    </div>
+    <div class="editor-toolbar">
+      <button class="btn" id="editor-rotate-left" type="button" title="Rotate left">⟲ Rotate left</button>
+      <button class="btn" id="editor-rotate-right" type="button" title="Rotate right">⟳ Rotate right</button>
+      <button class="btn" id="editor-crop-start" type="button">Crop…</button>
+      <button class="btn btn-primary" id="editor-crop-apply" type="button" hidden>Apply crop</button>
+      <button class="btn" id="editor-crop-cancel" type="button" hidden>Cancel crop</button>
+      <span class="spacer"></span>
+      <button class="btn" id="editor-undo" type="button" hidden>Undo edit</button>
+    </div>
+    <p class="muted note" id="editor-note"></p>
   </aside>
 </div>
 

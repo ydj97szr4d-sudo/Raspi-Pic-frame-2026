@@ -128,6 +128,23 @@ if HAVE_FASTAPI:
         key_order: list[list[str]] | None = None
         suppress: list[str] | None = None
 
+    class EditBody(BaseModel):
+        """A rotate or a crop for PicFrame.edit_photo: ``{"op": "rotate",
+        "degrees": 90}`` or ``{"op": "crop", "box": [0, 0, 1, 0.5]}``."""
+
+        model_config = ConfigDict(extra="ignore")
+
+        op: str
+        degrees: int | None = None
+        box: list[float] | None = None
+
+    class RemoveBatchBody(BaseModel):
+        """The library grid's "Remove selected": ``{"ids": [12, 48, 91]}``."""
+
+        model_config = ConfigDict(extra="ignore")
+
+        ids: list[int] = []
+
 
 # --------------------------------------------------------------------------
 # Keeping an open interface local
@@ -803,6 +820,54 @@ class HttpServer:
             few at a time in the background; see Scanner.backfill_phashes)."""
             records = await _in_thread(self.app.library.similar, file_id, limit)
             return [_summary(r) for r in records]
+
+        @api.post("/api/library/photo/{file_id}/edit", dependencies=guard)
+        async def edit_photo(file_id: int, body: EditBody):
+            """Rotate or crop this photograph on disk -- see
+            PicFrame.edit_photo. The file's first edit keeps a backup (see
+            library.edits.EditLog), which is what makes /undo-edit below
+            possible."""
+            kwargs: dict[str, Any] = {}
+            if body.degrees is not None:
+                kwargs["degrees"] = body.degrees
+            if body.box is not None:
+                kwargs["box"] = body.box
+            result = await self.app.edit_photo(file_id, body.op, **kwargs)
+            if not result.get("ok"):
+                raise HTTPException(400, result.get("error") or "that edit failed")
+            record = await _in_thread(self.app.library.get, file_id)
+            if record is None:
+                raise HTTPException(404, "not found")
+            return {**_summary(record), "has_backup": True}
+
+        @api.post("/api/library/photo/{file_id}/undo-edit", dependencies=guard)
+        async def undo_edit(file_id: int):
+            result = await self.app.undo_edit(file_id)
+            if not result.get("ok"):
+                raise HTTPException(400, result.get("error") or "nothing to undo")
+            record = await _in_thread(self.app.library.get, file_id)
+            if record is None:
+                raise HTTPException(404, "not found")
+            return _summary(record)
+
+        @api.get("/api/library/photo/{file_id}/edit-status", dependencies=guard)
+        async def edit_status(file_id: int):
+            """Whether this file has a live backup to undo back to -- asked
+            when the editor opens for a picture, not carried on every grid
+            card, since almost none of them have ever been edited."""
+            record = await _in_thread(self.app.library.get, file_id)
+            if record is None:
+                raise HTTPException(404, "not found")
+            entry = await _in_thread(self.app.edits.active, record.path)
+            return {"has_backup": entry is not None}
+
+        @api.post("/api/library/remove", dependencies=guard)
+        async def remove_batch(body: RemoveBatchBody):
+            """"Remove selected" in the library grid -- the same Remove every
+            single picture already has, just several at once. Source is
+            always "http" here (never "mqtt"), the same as every other grid
+            action, so library.allow_delete governs it the normal way."""
+            return await self.app.bulk_remove(body.ids, source="http")
 
         @api.get("/api/library/photo/{file_id}", dependencies=guard)
         async def photo(file_id: int):

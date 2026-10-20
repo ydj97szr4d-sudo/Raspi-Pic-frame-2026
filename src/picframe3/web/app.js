@@ -515,19 +515,39 @@ async function loadLibrary() {
     const card = document.createElement("figure");
     card.className = "card";
     card.title = p.path;
+    if (selectedIds.has(p.id)) card.classList.add("is-selected");
     card.innerHTML =
       (p.is_video ? "" : `<button class="similar-btn" type="button"
          title="Find photos that look like this one">Similar</button>`) +
+      (p.is_video ? "" : `<button class="edit-btn" type="button"
+         title="Rotate or crop this photo">Edit</button>`) +
       `<img loading="lazy" src="${thumbUrl(p)}" alt="">` +
       (p.is_video ? `<span class="badge">video</span>` : "") +
+      `<span class="select-check">✓</span>` +
       `<figcaption>${escapeHtml(p.title || p.basename)}</figcaption>`;
     card.querySelector("img").onload = (e) => e.target.classList.add("ready");
-    card.onclick = () => send("jump", { id: p.id });
+    card.onclick = () => {
+      if (selecting) {
+        if (selectedIds.has(p.id)) selectedIds.delete(p.id);
+        else selectedIds.add(p.id);
+        card.classList.toggle("is-selected");
+        updateSelectBanner();
+      } else {
+        send("jump", { id: p.id });
+      }
+    };
     const simBtn = card.querySelector(".similar-btn");
     if (simBtn) {
       simBtn.onclick = (e) => {
         e.stopPropagation();
         showSimilar(p.id, p.title || p.basename);
+      };
+    }
+    const editBtn = card.querySelector(".edit-btn");
+    if (editBtn) {
+      editBtn.onclick = (e) => {
+        e.stopPropagation();
+        openEditor(p);
       };
     }
     grid.appendChild(card);
@@ -542,6 +562,274 @@ async function loadLibrary() {
     });
   }
 }
+
+/* A fetch that surfaces the server's own reason for saying no (FastAPI's
+   {"detail": "..."}) rather than just the HTTP status line -- worth it here
+   because the reasons are the kind someone acting on their own photo should
+   actually see ("that crop is too small"), not just "400 Bad Request". */
+async function apiExpect(path, options) {
+  const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...options });
+  let body = null;
+  try { body = await res.json(); } catch (_) { /* no body, or not JSON */ }
+  if (!res.ok) throw new Error((body && body.detail) || `${res.status} ${res.statusText}`);
+  return body;
+}
+
+/* --------------------------------------------------------- select & bulk
+   remove */
+let selecting = false;
+let selectedIds = new Set();
+
+function updateSelectBanner() {
+  $("#select-count").textContent =
+    `${selectedIds.size} selected`;
+  $("#select-remove").disabled = selectedIds.size === 0;
+}
+
+function enterSelectMode() {
+  if (similarTo) { similarTo = null; $("#similar-banner").hidden = true; }
+  selecting = true;
+  selectedIds.clear();
+  $("#library-toolbar").hidden = true;
+  $("#select-banner").hidden = false;
+  $("#grid").classList.add("is-selecting");
+  updateSelectBanner();
+  loadLibrary();
+}
+
+function exitSelectMode() {
+  selecting = false;
+  selectedIds.clear();
+  $("#grid").classList.remove("is-selecting");
+  $("#select-banner").hidden = true;
+  $("#library-toolbar").hidden = false;
+  loadLibrary();
+}
+
+$("#select-mode").addEventListener("click", enterSelectMode);
+$("#select-cancel").addEventListener("click", exitSelectMode);
+$("#select-remove").addEventListener("click", async () => {
+  const ids = [...selectedIds];
+  if (!ids.length) return;
+  if (!confirm(
+    `Remove ${ids.length} picture${ids.length === 1 ? "" : "s"} from the ` +
+    "library? Each one moves to the Removed tab, the same as removing one " +
+    "at a time, so it can still be put back from there.")) return;
+  const button = $("#select-remove");
+  button.disabled = true;
+  button.textContent = "Removing…";
+  try {
+    const result = await apiExpect("/api/library/remove", {
+      method: "POST", body: JSON.stringify({ ids }),
+    });
+    if (result && result.skipped && result.skipped.length) {
+      alert(`${result.skipped.length} of those were already gone and could not be removed.`);
+    }
+  } catch (err) {
+    alert(`Could not remove them: ${err.message}`);
+  }
+  button.textContent = "Remove selected";
+  exitSelectMode();
+});
+
+/* ------------------------------------------------------------ the editor
+   Rotate, crop, and undo -- a basic edit done right on the library grid
+   rather than in some other program, with the one safety net the backend
+   promises: the first edit to a picture keeps a backup, so a bad crop is
+   always one "Undo edit" away from gone. */
+let editorPhoto = null;
+
+function openEditor(p) {
+  editorPhoto = p;
+  $("#editor-title").textContent = p.title || p.basename;
+  $("#editor-img").src = thumbUrl(p);
+  $("#editor-note").className = "muted note";
+  $("#editor-note").textContent = "";
+  cropCancel();
+  $("#editor-backdrop").setAttribute("data-open", "");
+  refreshUndoButton();
+}
+
+function closeEditor() {
+  $("#editor-backdrop").removeAttribute("data-open");
+  editorPhoto = null;
+  cropCancel();
+}
+$("#editor-close").onclick = closeEditor;
+$("#editor-backdrop").addEventListener("click", (e) => {
+  if (e.target === $("#editor-backdrop")) closeEditor();
+});
+
+async function refreshUndoButton() {
+  const btn = $("#editor-undo");
+  btn.hidden = true;
+  if (!editorPhoto) return;
+  try {
+    const status = await api(`/api/library/photo/${editorPhoto.id}/edit-status`);
+    btn.hidden = !status.has_backup;
+  } catch (err) { /* leave it hidden -- not worth failing the editor over */ }
+}
+
+async function doEdit(op, params) {
+  if (!editorPhoto) return;
+  $("#editor-note").className = "muted note is-busy";
+  $("#editor-note").textContent = "Saving…";
+  try {
+    const record = await apiExpect(`/api/library/photo/${editorPhoto.id}/edit`, {
+      method: "POST", body: JSON.stringify({ op, ...params }),
+    });
+    editorPhoto = record;
+    $("#editor-img").src = thumbUrl(record);
+    $("#editor-note").className = "muted note";
+    $("#editor-note").textContent = "Saved.";
+    cropCancel();
+    refreshUndoButton();
+    loadLibrary();
+  } catch (err) {
+    $("#editor-note").className = "muted note is-error";
+    $("#editor-note").textContent = `Could not save that: ${err.message}`;
+  }
+}
+$("#editor-rotate-left").onclick = () => doEdit("rotate", { degrees: -90 });
+$("#editor-rotate-right").onclick = () => doEdit("rotate", { degrees: 90 });
+
+$("#editor-undo").onclick = async () => {
+  if (!editorPhoto) return;
+  if (!confirm("Put back the original, undoing the last edit to this photo?")) return;
+  $("#editor-note").className = "muted note is-busy";
+  $("#editor-note").textContent = "Restoring…";
+  try {
+    const record = await apiExpect(`/api/library/photo/${editorPhoto.id}/undo-edit`, {
+      method: "POST",
+    });
+    editorPhoto = record;
+    $("#editor-img").src = thumbUrl(record);
+    $("#editor-note").className = "muted note";
+    $("#editor-note").textContent = "Restored.";
+    cropCancel();
+    refreshUndoButton();
+    loadLibrary();
+  } catch (err) {
+    $("#editor-note").className = "muted note is-error";
+    $("#editor-note").textContent = `Could not undo that: ${err.message}`;
+  }
+};
+
+/* -- crop: a plain-JS drag rectangle over the displayed photo, converted to
+   a 0..1 box at Apply time. Pixels on screen, not the photo's real pixels --
+   the fraction is the same either way, and the backend is what actually
+   measures the real image. */
+const cropBoxEl = $("#crop-box");
+let dragMode = null;   // "move" or a corner name, while a drag is live
+let dragStart = null;
+
+function setCropPixels(x, y, w, h) {
+  cropBoxEl.style.left = `${x}px`;
+  cropBoxEl.style.top = `${y}px`;
+  cropBoxEl.style.width = `${w}px`;
+  cropBoxEl.style.height = `${h}px`;
+}
+
+function cropGeometry() {
+  return {
+    x: parseFloat(cropBoxEl.style.left) || 0,
+    y: parseFloat(cropBoxEl.style.top) || 0,
+    w: parseFloat(cropBoxEl.style.width) || 0,
+    h: parseFloat(cropBoxEl.style.height) || 0,
+  };
+}
+
+function cropStart() {
+  const img = $("#editor-img");
+  const w = img.clientWidth, h = img.clientHeight;
+  const bw = w * 0.7, bh = h * 0.7;
+  setCropPixels((w - bw) / 2, (h - bh) / 2, bw, bh);
+  cropBoxEl.hidden = false;
+  $("#editor-crop-start").hidden = true;
+  $("#editor-crop-apply").hidden = false;
+  $("#editor-crop-cancel").hidden = false;
+}
+$("#editor-crop-start").onclick = cropStart;
+
+function cropCancel() {
+  cropBoxEl.hidden = true;
+  $("#editor-crop-start").hidden = false;
+  $("#editor-crop-apply").hidden = true;
+  $("#editor-crop-cancel").hidden = true;
+}
+$("#editor-crop-cancel").onclick = cropCancel;
+
+$("#editor-crop-apply").onclick = () => {
+  const img = $("#editor-img");
+  const w = img.clientWidth, h = img.clientHeight;
+  const { x, y, w: bw, h: bh } = cropGeometry();
+  if (!w || !h || bw < 4 || bh < 4) return;
+  doEdit("crop", { box: [x / w, y / h, (x + bw) / w, (y + bh) / h] });
+};
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+function cropPointerMove(e) {
+  if (!dragMode || !dragStart) return;
+  const dx = e.clientX - dragStart.x, dy = e.clientY - dragStart.y;
+  const { x, y, w, h } = dragStart.box;
+  const { stageW, stageH } = dragStart;
+  const MIN = 24;
+  let nx = x, ny = y, nw = w, nh = h;
+  if (dragMode === "move") {
+    nx = clamp(x + dx, 0, Math.max(0, stageW - w));
+    ny = clamp(y + dy, 0, Math.max(0, stageH - h));
+  } else if (dragMode === "nw") {
+    nx = clamp(x + dx, 0, x + w - MIN);
+    ny = clamp(y + dy, 0, y + h - MIN);
+    nw = x + w - nx;
+    nh = y + h - ny;
+  } else if (dragMode === "ne") {
+    ny = clamp(y + dy, 0, y + h - MIN);
+    nw = clamp(w + dx, MIN, stageW - x);
+    nh = y + h - ny;
+  } else if (dragMode === "sw") {
+    nx = clamp(x + dx, 0, x + w - MIN);
+    nw = x + w - nx;
+    nh = clamp(h + dy, MIN, stageH - y);
+  } else if (dragMode === "se") {
+    nw = clamp(w + dx, MIN, stageW - x);
+    nh = clamp(h + dy, MIN, stageH - y);
+  }
+  setCropPixels(nx, ny, nw, nh);
+}
+
+function cropPointerUp() {
+  dragMode = null;
+  dragStart = null;
+  document.removeEventListener("pointermove", cropPointerMove);
+  document.removeEventListener("pointerup", cropPointerUp);
+}
+
+function cropPointerDown(e, mode) {
+  e.preventDefault();
+  e.stopPropagation();
+  dragMode = mode;
+  const img = $("#editor-img");
+  dragStart = {
+    x: e.clientX, y: e.clientY, box: cropGeometry(),
+    stageW: img.clientWidth, stageH: img.clientHeight,
+  };
+  document.addEventListener("pointermove", cropPointerMove);
+  document.addEventListener("pointerup", cropPointerUp);
+}
+
+cropBoxEl.addEventListener("pointerdown", (e) => {
+  if (e.target.classList.contains("crop-handle")) return;
+  cropPointerDown(e, "move");
+});
+cropBoxEl.querySelectorAll(".crop-handle").forEach((h) => {
+  h.addEventListener("pointerdown", (e) => cropPointerDown(e, h.dataset.corner));
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && editorPhoto) closeEditor();
+});
 
 /* -------------------------------------------------------------- removed */
 /* Removing moves a picture aside and writes a line about it; this page reads
