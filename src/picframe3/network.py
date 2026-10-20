@@ -245,6 +245,17 @@ async def link_details(iface: str) -> dict[str, Any]:
         if freq:
             details["band"] = ("6 GHz" if freq >= 5925 else
                                "5 GHz" if freq >= 4900 else "2.4 GHz")
+    if "ssid" not in details:
+        # ``iw`` is not on every Pi image (it's a separate package from
+        # NetworkManager), and when it's missing the SSID line above never
+        # arrives -- silently, by design, same as the bitrates. But unlike
+        # the bitrates, nmcli can answer this one, and nmcli is already a
+        # hard requirement elsewhere in this file (wifi_scan/wifi_connect,
+        # the polkit rules), so it's a safe fallback rather than a new
+        # dependency.
+        ssid = await _nmcli_ssid(iface)
+        if ssid:
+            details["ssid"] = ssid
     return details
 
 
@@ -254,6 +265,23 @@ async def link_details(iface: str) -> dict[str, Any]:
 #: SSID containing ":" as an extra field, so the split below only breaks on a
 #: colon that is not preceded by a backslash.
 _UNESCAPED_COLON = re.compile(r"(?<!\\):")
+
+
+async def _nmcli_ssid(iface: str) -> str | None:
+    """The SSID of whichever Wi-Fi profile nmcli currently has active on
+    ``iface``, straight from nmcli rather than ``iw`` -- see the note in
+    ``link_details`` above."""
+    out = await _output("nmcli", "-t", "-f", "active,ssid", "dev", "wifi",
+                         "list", "ifname", iface)
+    if not out:
+        return None
+    for line in out.splitlines():
+        parts = _UNESCAPED_COLON.split(line, maxsplit=1)
+        if len(parts) == 2 and parts[0] == "yes":
+            ssid = parts[1].replace("\\:", ":").strip()
+            if ssid:
+                return ssid
+    return None
 
 
 async def wifi_scan(iface: str = "") -> list[dict[str, Any]]:
