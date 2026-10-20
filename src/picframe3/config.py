@@ -609,6 +609,31 @@ class StatusConfig:
 
 
 @dataclass
+class BrandConfig:
+    """The small animated mark in a corner of the screen -- the frame's own
+    maker's mark, not a photo caption or status readout. Drawn transparent
+    apart from the mark itself and a thin outline around it, so it sits on
+    top of whatever photo is showing rather than behind a panel like the
+    clock or status strip.
+    """
+
+    #: Off removes the mark entirely; nothing is drawn or animated.
+    enabled: bool = True
+    #: Which corner it's inset from: TL TC TR BL BC BR.
+    position: str = "BR"
+    #: Inset from that corner, percent of screen width/height -- [x, y].
+    offset_pct: list[float] = field(default_factory=lambda: [3.0, 3.0])
+    #: Size of the mark, in real screen pixels (its longer side).
+    size: int = 160
+    #: 0 (invisible) - 1 (fully opaque). Applied to the whole mark, outline
+    #: included, so it can be faded back to sit quietly in the corner.
+    opacity: float = 0.9
+    #: Off draws the mark as a plain static outline with no motion at all;
+    #: on, it runs through its animated forming/dissolving cycle.
+    animated: bool = True
+
+
+@dataclass
 class Config:
     display: DisplayConfig = field(default_factory=DisplayConfig)
     slideshow: SlideshowConfig = field(default_factory=SlideshowConfig)
@@ -629,6 +654,7 @@ class Config:
     calendar: CalendarConfig = field(default_factory=CalendarConfig)
     clock: ClockConfig = field(default_factory=ClockConfig)
     status: StatusConfig = field(default_factory=StatusConfig)
+    brand: BrandConfig = field(default_factory=BrandConfig)
 
     #: Where this config was loaded from, for ``save()``.
     source_path: str | None = None

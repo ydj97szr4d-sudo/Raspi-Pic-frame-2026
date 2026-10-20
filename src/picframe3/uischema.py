@@ -49,6 +49,7 @@ SECTION_PROSE = {
                 "month grid.",
     "clock": "A custom-drawn clock with its own translucent panel.",
     "status": "A small status strip -- outdoor sensor link, and more to come.",
+    "brand": "The small animated maker's mark in a corner of the screen.",
 }
 
 SECTION_LABELS = {
@@ -71,6 +72,7 @@ SECTION_LABELS = {
     "calendar": "Calendar widget",
     "clock": "Clock widget",
     "status": "Status strip",
+    "brand": "Brand mark",
 }
 
 # --------------------------------------------------------------------------
@@ -271,6 +273,12 @@ NOTES = {
     "status.text_opacity": "0–1.",
     "status.background_color": "Red, green, blue, 0–255. The panel drawn behind the strip.",
     "status.background_opacity": "0 (no panel at all) – 1 (solid panel).",
+    "brand.enabled": "Off removes the mark entirely.",
+    "brand.position": "Which corner it's inset from.",
+    "brand.offset_pct": "Inset from that corner, percent of screen width/height — [x, y].",
+    "brand.size": "Size of the mark, in real screen pixels (its longer side).",
+    "brand.opacity": "0 (invisible) – 1 (fully opaque), applied to the whole mark.",
+    "brand.animated": "On: it runs its forming/dissolving animation. Off: a plain static mark, no motion.",
 }
 
 #: Labels where turning the field name into words is not good enough.
@@ -375,6 +383,11 @@ LABELS = {
     "status.text_opacity": "Font opacity",
     "status.background_color": "Background colour",
     "status.background_opacity": "Background opacity",
+    "brand.position": "Corner",
+    "brand.offset_pct": "Inset from corner (% x, y)",
+    "brand.size": "Mark size (px)",
+    "brand.opacity": "Opacity",
+    "brand.animated": "Animated",
 }
 
 # --------------------------------------------------------------------------
@@ -627,6 +640,8 @@ LIMITS: dict[str, tuple[float | None, float | None]] = {
     "status.size": (6, 256),
     "status.text_opacity": (0.0, 1.0),
     "status.background_opacity": (0.0, 1.0),
+    "brand.size": (16, 1024),
+    "brand.opacity": (0.0, 1.0),
 }
 
 #: Explicit control choices, where the type alone cannot say.
@@ -646,6 +661,7 @@ CHOICES: dict[str, list[str]] = {
     "clock.position": ["TL", "TC", "TR", "BL", "BC", "BR"],
     "viewer.text_position": ["", "TL", "TC", "TR", "BL", "BC", "BR"],
     "status.position": ["TL", "TC", "TR", "BL", "BC", "BR"],
+    "brand.position": ["TL", "TC", "TR", "BL", "BC", "BR"],
     "slideshow.video_engine": ["gstreamer", "vlc"],
 }
 
@@ -1079,6 +1095,15 @@ def _state_status(c) -> str:
     return f"{st.position}, {_n(x)}%/{_n(y)}% inset · {panel}"
 
 
+def _state_brand(c) -> str:
+    b = c.brand
+    if not b.enabled:
+        return "Off — nothing drawn"
+    x, y = b.offset_pct
+    motion = "animated" if b.animated else "static"
+    return f"{b.position}, {_n(x)}%/{_n(y)}% inset · {b.size}px · {motion} · {_ratio(b.opacity)} opacity"
+
+
 #: The caption elements, said in as few words as a summary line can spare.
 CAPTION_SHORT = {
     "title": "Title", "caption": "Caption", "name": "File name",
@@ -1194,6 +1219,11 @@ JOBS = [
      "fields": ["status.enabled", "status.position", "status.offset_pct",
                 "status.size", "status.text_color", "status.text_opacity",
                 "status.background_color", "status.background_opacity"]},
+    {"name": "brand", "kicker": "Brand mark",
+     "title": "The small animated mark in a corner of the screen",
+     "section": "brand", "state": _state_brand,
+     "fields": ["brand.enabled", "brand.position", "brand.offset_pct",
+                "brand.size", "brand.opacity", "brand.animated"]},
 ]
 
 
