@@ -568,8 +568,12 @@ async function loadLibrary() {
     card.innerHTML =
       (p.is_video ? "" : `<button class="similar-btn" type="button"
          title="Find photos that look like this one">Similar</button>`) +
-      (p.is_video ? "" : `<button class="edit-btn" type="button"
-         title="Rotate or crop this photo">Edit</button>`) +
+      `<div class="card-actions">` +
+        (p.is_video ? "" : `<button class="edit-btn" type="button"
+           title="Rotate or crop this photo">Edit</button>`) +
+        `<button class="remove-btn" type="button"
+           title="Remove this picture from the library">Remove</button>` +
+      `</div>` +
       `<img loading="lazy" src="${thumbUrl(p)}" alt="">` +
       (p.is_video ? `<span class="badge">video</span>` : "") +
       `<span class="select-check">✓</span>` +
@@ -599,6 +603,23 @@ async function loadLibrary() {
         openEditor(p);
       };
     }
+    const removeBtn = card.querySelector(".remove-btn");
+    removeBtn.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm(`Remove ${p.title || p.basename} from the library?`)) return;
+      removeBtn.disabled = true;
+      removeBtn.textContent = "Removing…";
+      try {
+        await apiExpect("/api/library/remove", {
+          method: "POST", body: JSON.stringify({ ids: [p.id] }),
+        });
+        loadLibrary();
+      } catch (err) {
+        alert(`Could not remove it: ${err.message}`);
+        removeBtn.disabled = false;
+        removeBtn.textContent = "Remove";
+      }
+    };
     grid.appendChild(card);
   }
   if ($("#folder").options.length <= 1) {
@@ -762,6 +783,27 @@ $("#editor-undo").onclick = async () => {
     $("#editor-note").className = "muted note is-error";
     $("#editor-note").textContent = `Could not undo that: ${err.message}`;
   }
+};
+
+$("#editor-remove").onclick = async () => {
+  if (!editorPhoto) return;
+  if (!confirm(
+    `Remove ${editorPhoto.title || editorPhoto.basename} from the library?`)) return;
+  const button = $("#editor-remove");
+  button.disabled = true;
+  button.textContent = "Removing…";
+  try {
+    await apiExpect("/api/library/remove", {
+      method: "POST", body: JSON.stringify({ ids: [editorPhoto.id] }),
+    });
+    closeEditor();
+    loadLibrary();
+  } catch (err) {
+    $("#editor-note").className = "muted note is-error";
+    $("#editor-note").textContent = `Could not remove it: ${err.message}`;
+  }
+  button.disabled = false;
+  button.textContent = "Remove photo";
 };
 
 /* -- crop: a plain-JS drag rectangle over the displayed photo, converted to

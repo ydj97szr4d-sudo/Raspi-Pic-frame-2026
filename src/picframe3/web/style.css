@@ -346,21 +346,32 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin-top: 6px; }
 }
 .card:hover .similar-btn, .card .similar-btn:focus-visible { opacity: 1; }
 .card .similar-btn:hover { background: var(--accent); }
-/* "Edit" sits opposite "Similar" rather than stacking under it, so the two
-   never compete for the same thumb-sized corner of a small thumbnail. */
-.card .edit-btn {
+/* "Edit" and "Remove" share the opposite corner from "Similar" rather than
+   stacking under it, so no two buttons ever compete for the same
+   thumb-sized corner of a small thumbnail. Each photo offers all three
+   actions straight from the grid -- no need to enter Select mode just to
+   drop or fix a single picture; Select mode (below) is for doing either to
+   several at once. */
+.card .card-actions {
   position: absolute; top: 5px; right: 5px; z-index: 1;
-  font-size: 10px; font-weight: 700; letter-spacing: .04em;
-  background: #000a; color: #fff; border: 0; padding: 4px 7px;
+  display: flex; gap: 4px;
   opacity: 0; transition: opacity .15s;
 }
-.card:hover .edit-btn, .card .edit-btn:focus-visible { opacity: 1; }
+.card:hover .card-actions, .card .card-actions:focus-within { opacity: 1; }
+.card .card-actions button {
+  font-size: 10px; font-weight: 700; letter-spacing: .04em;
+  background: #000a; color: #fff; border: 0; padding: 4px 7px;
+}
 .card .edit-btn:hover { background: var(--accent); }
+.card .remove-btn:hover { background: var(--danger); }
 /* Select mode turns every tile into a checkbox. The tick replaces the
    figcaption's gradient corner rather than covering the whole photo, so you
-   can still tell which picture you are about to delete. */
+   can still tell which picture you are about to delete. Individual Edit and
+   Remove step aside here -- one tap during a multi-select should only ever
+   mean "add this one to the selection", never also fire a single-photo
+   action underneath it. */
 .grid.is-selecting .card { cursor: default; }
-.grid.is-selecting .similar-btn, .grid.is-selecting .edit-btn { display: none; }
+.grid.is-selecting .similar-btn, .grid.is-selecting .card-actions { display: none; }
 .card .select-check {
   position: absolute; top: 6px; right: 6px; z-index: 2;
   width: 22px; height: 22px; border-radius: 50%;
