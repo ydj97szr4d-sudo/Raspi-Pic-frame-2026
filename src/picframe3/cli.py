@@ -653,40 +653,106 @@ def _polkit_knows(action_id: str) -> bool:
         return False
 
 
+def _polkit_grants(action_id: str) -> bool | None:
+    """Whether polkit actually grants *this* action to the user running doctor.
+
+    Asking polkitd directly with ``pkcheck`` rather than reading the rule file
+    ourselves: ``/etc/polkit-1/rules.d`` is commonly ``root:polkitd`` mode
+    0750 (confirmed on a stock Raspberry Pi OS install), which the frame's own
+    unprivileged user cannot even list or stat into -- so ``os.path.exists()``
+    on a rule inside it returns False whether or not the rule is there, and a
+    check built on that lies every single time it is run as that user. polkitd
+    itself always has permission to read its own rules, so asking it is both
+    simpler and the only way that is actually correct here.
+
+    True/False is a real answer; None means pkcheck could not be asked at all
+    (not installed, or it errored) -- not the same as "no".
+    """
+    import subprocess
+
+    if not _has("pkcheck"):
+        return None
+    try:
+        result = subprocess.run(
+            ["pkcheck", "--action-id", action_id, "--process", str(os.getpid())],
+            capture_output=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return result.returncode == 0
+
+
+def _rule_readable(path: str) -> bool | None:
+    """Best-effort fallback for when ``pkcheck`` itself is not available.
+
+    True/False only when the file could actually be stat()ed; None when the
+    attempt failed for a permissions reason rather than a missing-file one,
+    since those two cases must not be reported the same way -- "not found"
+    invites 'picframe3 setup'; "cannot tell from here" does not.
+    """
+    try:
+        return os.path.exists(path)
+    except OSError:
+        return None
+
+
 def _power_off_permission() -> tuple[bool, str, str]:
     """Can the frame really power the Pi off when the button is pressed?"""
+    action = "org.freedesktop.login1.power-off"
+    granted = _polkit_grants(action)
+    if granted is True:
+        return True, "polkit grants this user the action", ""
+    if granted is False:
+        return (False, "polkit does not grant this to this user",
+                "run 'picframe3 setup' to (re)install the rule. Without it "
+                "the Shutdown button reports that it could not power the "
+                "Pi off.")
+    # No pkcheck to ask -- fall back to the older, weaker check.
+    if not _polkit_knows(action):
+        return (False, "polkit is not available, so the rule is never read",
+                "install polkitd; the frame can then power itself off.")
     rule = "/etc/polkit-1/rules.d/55-picframe3-power.rules"
-    if os.path.exists(rule) and _polkit_knows("org.freedesktop.login1.power-off"):
+    exists = _rule_readable(rule)
+    if exists:
         return True, "polkit rule installed and polkit knows the action", ""
-    if not os.path.exists(rule):
-        return (False, "polkit rule missing",
-                "run 'picframe3 setup' to install it. Without it the Shutdown "
-                "button reports that it could not power the Pi off.")
-    return (False, "polkit is not available, so the rule is never read",
-            "install polkitd; the frame can then power itself off.")
+    if exists is None:
+        return (False, "could not be confirmed from here (no 'pkcheck', and "
+                "this user cannot read the rules directory)",
+                "run 'picframe3 setup' to (re)install it, or check directly "
+                "with 'sudo pkcheck --action-id "
+                f"{action} --process <pid>'.")
+    return (False, "polkit rule missing",
+            "run 'picframe3 setup' to install it. Without it the Shutdown "
+            "button reports that it could not power the Pi off.")
 
 
 def _repair_permission() -> tuple[bool, str, str]:
-    """Can the frame really mend its own network connection?
-
-    Two things have to be true and only one of them was checked. The rule file
-    being on disk says nothing about whether anything will ever read it, which
-    is what ``_polkit_knows`` asks about; doctor used to report a tick for a
-    rule nothing would ever read.
-    """
-    rule = "/etc/polkit-1/rules.d/50-picframe3-network.rules"
-    have_rule = os.path.exists(rule)
-    have_polkit = _polkit_knows("org.freedesktop.NetworkManager.network-control")
-
-    if have_rule and have_polkit:
-        return True, "polkit rule installed and polkit knows the action", ""
-    if not have_rule:
-        return (False, "polkit rule missing",
-                "run 'picframe3 setup' to install it, or set "
+    """Can the frame really mend its own network connection?"""
+    action = "org.freedesktop.NetworkManager.network-control"
+    granted = _polkit_grants(action)
+    if granted is True:
+        return True, "polkit grants this user the action", ""
+    if granted is False:
+        return (False, "polkit does not grant this to this user",
+                "run 'picframe3 setup' to (re)install the rule, or set "
                 "network.repair: false to watch without mending.")
-    return (False, "polkit is not available, so the rule is never read",
-            "install polkitd and NetworkManager, or set network.repair: false "
-            "so the frame reports outages without trying to mend them.")
+    if not _polkit_knows(action):
+        return (False, "polkit is not available, so the rule is never read",
+                "install polkitd and NetworkManager, or set "
+                "network.repair: false so the frame reports outages "
+                "without trying to mend them.")
+    rule = "/etc/polkit-1/rules.d/50-picframe3-network.rules"
+    exists = _rule_readable(rule)
+    if exists:
+        return True, "polkit rule installed and polkit knows the action", ""
+    if exists is None:
+        return (False, "could not be confirmed from here (no 'pkcheck', and "
+                "this user cannot read the rules directory)",
+                "run 'picframe3 setup' to (re)install it, or check directly "
+                "with 'sudo pkcheck --action-id "
+                f"{action} --process <pid>'.")
+    return (False, "polkit rule missing",
+            "run 'picframe3 setup' to install it, or set "
+            "network.repair: false to watch without mending.")
 
 
 def _wifi_connect_permission() -> tuple[bool, str, str]:
@@ -698,28 +764,33 @@ def _wifi_connect_permission() -> tuple[bool, str, str]:
     which needs an extra polkit action
     (``org.freedesktop.NetworkManager.settings.modify.system``). A frame set
     up before that action was added to ``50-picframe3-network.rules`` has the
-    older, narrower rule file on disk -- present, but missing the one line
-    this needs -- which is why the file's own content is checked here rather
-    than only whether it exists.
+    older, narrower rule on disk, which is exactly the case ``pkcheck``
+    answers correctly and a plain file read cannot: the file is still there,
+    so "missing" would be wrong, but the one line this needs is not in it yet.
     """
-    rule = "/etc/polkit-1/rules.d/50-picframe3-network.rules"
     action = "org.freedesktop.NetworkManager.settings.modify.system"
-    try:
-        with open(rule, encoding="utf-8") as fh:
-            has_action_line = action in fh.read()
-    except OSError:
-        has_action_line = False
-    have_polkit = _polkit_knows(action)
-
-    if has_action_line and have_polkit:
-        return True, "polkit rule installed and polkit knows the action", ""
-    if not has_action_line:
-        return (False, "polkit rule missing or out of date",
-                "run 'picframe3 setup' again to refresh "
-                f"{rule} with the newer rule that includes this action.")
-    return (False, "polkit is not available, so the rule is never read",
-            "install polkitd and NetworkManager to switch networks from here; "
-            "nmcli at the command line still works without it.")
+    granted = _polkit_grants(action)
+    if granted is True:
+        return True, "polkit grants this user the action", ""
+    if granted is False:
+        return (False, "polkit does not grant this to this user",
+                "run 'picframe3 setup' again to refresh the rule with the "
+                "newer one that includes this action.")
+    if not _polkit_knows(action):
+        return (False, "polkit is not available, so the rule is never read",
+                "install polkitd and NetworkManager to switch networks "
+                "from here; nmcli at the command line still works "
+                "without it.")
+    # No pkcheck, and this check specifically needs to tell "the rule is
+    # missing" apart from "the rule is there but out of date" -- a plain
+    # os.path.exists() cannot make that distinction (nor, if the rules
+    # directory is unreadable to this user, can it even confirm existence),
+    # so unlike the two checks above there is no meaningful fallback here.
+    return (False, "could not be confirmed from here (no 'pkcheck' on this "
+            "system)",
+            "run 'picframe3 setup' again to refresh the rule, or check "
+            "directly with 'sudo pkcheck --action-id "
+            f"{action} --process <pid>'.")
 
 
 def cmd_config(args) -> int:
