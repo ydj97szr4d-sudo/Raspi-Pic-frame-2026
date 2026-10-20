@@ -631,6 +631,14 @@ class BrandConfig:
     #: Off draws the mark as a plain static outline with no motion at all;
     #: on, it runs through its animated forming/dissolving cycle.
     animated: bool = True
+    #: Which animation cycles are in rotation -- one is picked at random
+    #: each time the previous one finishes. Names from
+    #: gfx.brand.BRAND_STYLE_NAMES ("dots", "scanline", "pop", "glitch",
+    #: "focus"). Empty is treated the same as every style being on, so a
+    #: frame mid-upgrade with a blank list still shows something rather
+    #: than nothing. Only looked at when `animated` is on.
+    styles: list[str] = field(default_factory=lambda: [
+        "dots", "scanline", "pop", "glitch", "focus"])
 
 
 @dataclass

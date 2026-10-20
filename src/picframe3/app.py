@@ -17,6 +17,9 @@ from .control.power import BacklightControl, PowerSchedule
 from .events import Action, Bus, Command, State
 from .gfx import Renderer, create_backend, transitions
 from .gfx import overlays as overlay_builders
+from .gfx.brand import BrandAnimator
+from .gfx.brand import placement as brand_placement
+from .gfx.brand import static_frame as brand_static_frame
 from .gfx.textstyle import TextStyle
 from .health import Health
 from .library.db import Library, Record
@@ -115,6 +118,12 @@ class PicFrame:
         self.display_on = True
         self._clock_minute: str | None = None
         self._info_until = 0.0
+        #: The animated badge (config.brand) rebuilds itself when its
+        #: settings change rather than every tick -- this is what it
+        #: checks against to notice that.
+        self._brand: BrandAnimator | None = None
+        self._brand_signature: tuple | None = None
+        self._brand_static_signature: tuple | None = None
         self._dirty = True
         self._frames = 0
         self._last_frame_at = 0.0
@@ -487,6 +496,12 @@ class PicFrame:
         # wake-ups a second and a 1.5 s fade would arrive in three visible
         # steps instead of a fade.
         if r.has_overlay("info") and self._info_fade(now)[1]:
+            return True
+        # The brand badge, when animated, is always somewhere in its cycle
+        # -- it never settles the way a caption fade does -- so as long as
+        # it's switched on the loop has to keep waking at a real cadence
+        # rather than idling at its usual up-to-twice-a-second rate.
+        if self.config.brand.enabled and self.config.brand.animated:
             return True
         return False
 
@@ -881,7 +896,61 @@ class PicFrame:
             self._clock_minute = None
             self._dirty = True
 
+        self._tick_brand(now)
         self._tick_user_overlay()
+
+    def _tick_brand(self, now: float) -> None:
+        """The small animated maker's mark (config.brand), in a corner of
+        the screen. Static mode is rebuilt once per settings change, like
+        the clock; animated mode is driven by a BrandAnimator that is
+        itself rebuilt only when a setting that changes its *shape*
+        (size, chosen styles) changes -- opacity and position are cheap
+        enough to just re-read every tick."""
+        renderer = self.renderer
+        if renderer is None:
+            return
+        cfg = self.config.brand
+        if not cfg.enabled:
+            if renderer.has_overlay("brand"):
+                renderer.set_overlay("brand", None)
+                self._dirty = True
+            self._brand = None
+            self._brand_signature = None
+            self._brand_static_signature = None
+            return
+
+        screen = (self.backend.width, self.backend.height)
+        offset_pct = tuple(cfg.offset_pct)
+
+        if not cfg.animated:
+            self._brand = None
+            self._brand_signature = None
+            signature = (cfg.size, round(cfg.opacity, 3), cfg.position, offset_pct, screen)
+            if signature == self._brand_static_signature:
+                return
+            self._brand_static_signature = signature
+            image = brand_static_frame(cfg.size, cfg.opacity)
+            x, y = brand_placement(cfg.position, offset_pct, cfg.size, screen)
+            renderer.set_overlay("brand", image, x=x, y=y, alpha=1.0, z=15)
+            self._dirty = True
+            return
+
+        self._brand_static_signature = None
+        shape = (cfg.size, tuple(cfg.styles))
+        if self._brand is None or shape != self._brand_signature:
+            self._brand_signature = shape
+            self._brand = BrandAnimator(list(cfg.styles), cfg.size)
+        self._brand.opacity = max(0.0, min(1.0, cfg.opacity))
+        image, changed = self._brand.frame(now)
+        if image is None:
+            if renderer.has_overlay("brand"):
+                renderer.set_overlay("brand", None)
+                self._dirty = True
+            return
+        if changed:
+            x, y = brand_placement(cfg.position, offset_pct, cfg.size, screen)
+            renderer.set_overlay("brand", image, x=x, y=y, alpha=1.0, z=15)
+            self._dirty = True
 
     def _clock_extra(self) -> str:
         """A second line under the time, taken from a file anything can write."""

@@ -279,6 +279,7 @@ NOTES = {
     "brand.size": "Size of the mark, in real screen pixels (its longer side).",
     "brand.opacity": "0 (invisible) – 1 (fully opaque), applied to the whole mark.",
     "brand.animated": "On: it runs its forming/dissolving animation. Off: a plain static mark, no motion.",
+    "brand.styles": "Which cycles are in rotation -- one is picked at random each time the previous one finishes. Empty means every style.",
 }
 
 #: Labels where turning the field name into words is not good enough.
@@ -388,6 +389,7 @@ LABELS = {
     "brand.size": "Mark size (px)",
     "brand.opacity": "Opacity",
     "brand.animated": "Animated",
+    "brand.styles": "Animation styles",
 }
 
 # --------------------------------------------------------------------------
@@ -673,6 +675,7 @@ DYNAMIC: dict[str, str] = {
     "viewer.fit_choices": "fits",
     "viewer.mat_style": "mat-styles",
     "viewer.show_text": "caption-fields",
+    "brand.styles": "brand-styles",
     "viewer.text_separator": "separator",
     "geo.detail": "geo-detail",
     "geo.key_order": "address-keys",
@@ -754,6 +757,7 @@ def _type_of(annotation: Any) -> tuple[str, bool]:
 def _options() -> dict[str, list[dict[str, str]]]:
     """The option lists the dynamic controls need, built once."""
     from .gfx import transitions
+    from .gfx.brand import BRAND_STYLES
     from .gfx.overlays import CAPTION_FIELDS
     from .library.playlist import ORDER_MODES
     from .media.geocode import DETAIL_LABELS, NOMINATIM_KEYS
@@ -786,6 +790,7 @@ def _options() -> dict[str, list[dict[str, str]]]:
         "fits": pairs((n, fit_labels[n]) for n in AUTO_FITS),
         "mat-styles": pairs((n, STYLE_LABELS.get(n, n)) for n in STYLES),
         "caption-fields": pairs(CAPTION_FIELDS),
+        "brand-styles": pairs(BRAND_STYLES),
         "geo-detail": pairs(DETAIL_LABELS.items()),
         "separator": pairs([("  ·  ", "Dot  ·"), (" – ", "Dash  –"),
                             (", ", "Comma  ,"), ("\n", "One per line")]),
@@ -1100,7 +1105,12 @@ def _state_brand(c) -> str:
     if not b.enabled:
         return "Off — nothing drawn"
     x, y = b.offset_pct
-    motion = "animated" if b.animated else "static"
+    if not b.animated:
+        motion = "static"
+    elif b.styles:
+        motion = f"animated, {len(b.styles)} style" + ("" if len(b.styles) == 1 else "s") + " in rotation"
+    else:
+        motion = "animated, every style in rotation"
     return f"{b.position}, {_n(x)}%/{_n(y)}% inset · {b.size}px · {motion} · {_ratio(b.opacity)} opacity"
 
 
@@ -1223,7 +1233,8 @@ JOBS = [
      "title": "The small animated mark in a corner of the screen",
      "section": "brand", "state": _state_brand,
      "fields": ["brand.enabled", "brand.position", "brand.offset_pct",
-                "brand.size", "brand.opacity", "brand.animated"]},
+                "brand.size", "brand.opacity", "brand.animated",
+                "brand.styles"]},
 ]
 
 
@@ -1267,7 +1278,7 @@ def schema(config, extra_options: dict[str, Any] | None = None) -> dict[str, Any
             if widget in ("transition", "separator", "geo-detail", "rotate",
                           "sync-directions", "locales"):
                 kind = "select"
-            elif widget in ("transitions", "fits", "caption-fields"):
+            elif widget in ("transitions", "fits", "caption-fields", "brand-styles"):
                 kind = "pick"
             elif widget == "mat-styles":
                 kind = "pick-string"
