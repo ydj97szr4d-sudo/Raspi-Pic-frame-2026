@@ -1356,8 +1356,15 @@ def run(config_path: str | None = None, *, venv_bin: str | None = None,
         # The update path goes through here (install.sh runs `setup --yes`), so
         # anything installed outside the config file has to be refreshed here
         # too -- otherwise a fix to the unit or to a rule only ever reaches
-        # people who run the wizard interactively.
+        # people who run the wizard interactively. install_network_rule and
+        # install_power_rule used to be missing from this list -- on disk
+        # only through the full interactive flow (a brand-new install, or
+        # choosing "Everything" by hand) -- which meant a change to either
+        # polkit rule, such as the extra verb Wi-Fi switching needs, never
+        # reached anyone who just ran a normal update.
         install_udev_rules()
+        install_network_rule(user)
+        install_power_rule(user)
         install_sync_support(user)
         install_date_languages(config)
         if shutil.which("systemctl") and Path("/run/systemd/system").exists():
