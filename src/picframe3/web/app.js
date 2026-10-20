@@ -987,7 +987,7 @@ function drawSheetExtra(job) {
   const box = $("#sheet-extra");
   stopSyncPolling();
   stopWifiPolling();
-  if (!job || (job.name !== "sync" && job.name !== "wifi")) {
+  if (!job || (job.name !== "sync" && job.name !== "wifi" && job.name !== "http")) {
     box.hidden = true;
     box.innerHTML = "";
     return;
@@ -999,6 +999,10 @@ function drawSheetExtra(job) {
     // While something is being installed the answer changes underneath us,
     // so the panel keeps asking for as long as it is on screen.
     syncTimer = setInterval(refreshSync, 4000);
+    return;
+  }
+  if (job.name === "http") {
+    drawHttps();
     return;
   }
   box.innerHTML = `<div class="panel"><p class="muted">Looking for networks…</p></div>`;
@@ -1257,6 +1261,60 @@ async function wifiConnect(ssid, password, el) {
   }
   if (openJob !== "wifi") return;
   await refreshWifi();
+}
+
+
+/* ---- HTTPS ----------------------------------------------------------
+   Like Syncthing and Wi-Fi above, this is one thing the plain settings
+   form cannot do: run openssl. The panel just asks the frame for its
+   current certificate paths (a plain read of the schema already in
+   memory, no polling needed -- a certificate does not change on its
+   own) and offers the one button that writes them. */
+function drawHttps() {
+  const box = $("#sheet-extra");
+  const byKey = fieldsByKey();
+  const certSet = !!(byKey["http.tls_cert"]?.value && byKey["http.tls_key"]?.value);
+  const port = byKey["http.port"]?.value ?? 9000;
+  const rows = [];
+
+  if (certSet) {
+    rows.push(`<p><strong>HTTPS is set up.</strong></p>
+      <p class="muted">Serving on port ${port} once the frame restarts to pick
+      it up. The certificate is self-signed, so a browser opening it for the
+      first time will warn that it is not trusted — that is expected for a
+      device with no public domain name; accept it once (Advanced → Proceed)
+      and it is remembered after that.</p>
+      <p><button class="btn" data-https="on" type="button">Generate a new certificate</button></p>`);
+  } else {
+    rows.push(`<p class="muted">Off — this page is served over plain http://.
+      Switching this on writes a self-signed certificate for this frame and
+      points the two settings below at it; nothing leaves the frame to get
+      it.</p>
+      <p><button class="btn btn-primary" data-https="on" type="button">Enable HTTPS</button></p>`);
+  }
+  box.innerHTML = `<div class="panel">${rows.join("")}</div>`;
+  box.querySelectorAll("[data-https]").forEach((el) => {
+    el.onclick = () => httpsAction(el, certSet);
+  });
+}
+
+async function httpsAction(el, force) {
+  el.disabled = true;
+  const label = el.textContent;
+  el.textContent = "Writing a certificate…";
+  try {
+    const result = await api("/api/http/enable-https", {
+      method: "POST", body: JSON.stringify({ force }) });
+    await loadSettings();   // picks up the new tls_cert/tls_key and redraws
+    if (openJob === "http") {
+      $("#sheet-extra").insertAdjacentHTML("afterbegin",
+        `<div class="panel"><p><strong>Done.</strong> Restart the frame, then
+         open <code>${escapeHtml(result.url)}</code>.</p></div>`);
+    }
+  } catch (err) {
+    el.textContent = "That did not work";
+    setTimeout(() => { el.disabled = false; el.textContent = label; }, 2500);
+  }
 }
 
 function optionList(name) {

@@ -633,6 +633,36 @@ class HttpServer:
             self.app.bus.submit(Command(Action.SHUTDOWN, source="http"))
             return {"ok": True, "saved": saved}
 
+        # -- https -------------------------------------------------------
+        # The settings page cannot run openssl itself, so this is the button
+        # behind "Enable HTTPS": the same self-signed-certificate steps as
+        # `picframe3 enable-https`, from picframe3.tls so the two can never
+        # drift apart, finishing through the ordinary SET_CONFIG path so the
+        # existing restart-required banner picks it up with no extra code.
+        @api.post("/api/http/enable-https", dependencies=guard)
+        async def enable_https(body: dict | None = None):
+            from .. import tls as tls_module
+
+            force = bool((body or {}).get("force", False))
+            result = await _in_thread(tls_module.enable_https, self.app.config, force)
+            if not result.ok:
+                raise HTTPException(503, result.error)
+            for key, value in (("http.tls_cert", result.cert_path),
+                               ("http.tls_key", result.key_path)):
+                self.app.bus.submit(Command(Action.SET_CONFIG,
+                                            {"key": key, "value": value}, source="http"))
+            await asyncio.sleep(0.2)
+            self.app.save_config()
+            return {
+                "ok": True,
+                "wrote": result.wrote,
+                "cert_path": result.cert_path,
+                "hostname": result.hostname,
+                "lan_ip": result.lan_ip,
+                "port": self.app.config.http.port,
+                "url": f"https://{result.lan_ip or result.hostname}:{self.app.config.http.port}/",
+            }
+
         # -- syncthing -------------------------------------------------
         # Syncthing is another program with its own web interface, and this is
         # not an attempt to reimplement it: it is the four things somebody

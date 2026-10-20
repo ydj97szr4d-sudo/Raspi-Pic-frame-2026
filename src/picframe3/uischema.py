@@ -1125,6 +1125,19 @@ def _state_brand(c) -> str:
     return f"{b.position}, {_n(x)}%/{_n(y)}% inset · {b.size}px · {motion} · {_ratio(b.opacity)} opacity"
 
 
+def _state_http(c) -> str:
+    h = c.http
+    if not h.enabled:
+        return "Off — nothing served"
+    scheme = "https" if h.tls_cert and h.tls_key else "http"
+    bits = [f"{scheme}://…:{h.port}"]
+    if scheme == "http":
+        bits.append("no certificate set")
+    if h.auth_user:
+        bits.append("password protected")
+    return " · ".join(bits)
+
+
 def _state_appearance(c) -> str:
     a = c.appearance
     bits = []
@@ -1262,6 +1275,14 @@ JOBS = [
      "title": "Font and accent colour of this web page",
      "section": "appearance", "state": _state_appearance,
      "fields": ["appearance.font", "appearance.accent_color"]},
+    {"name": "http", "kicker": "Web interface",
+     "title": "How this page itself is served",
+     "section": "http", "state": _state_http,
+     # Deliberately no http.tls_cert/tls_key here: those are file paths, not
+     # something to type into a text box. The card's own panel is the
+     # "Enable HTTPS" button that writes them for you, the same way the
+     # Syncthing and Wi-Fi cards above carry a panel instead of a field.
+     "fields": ["http.enabled", "http.port", "http.auth_user", "http.auth_password"]},
 ]
 
 

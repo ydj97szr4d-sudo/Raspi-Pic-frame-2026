@@ -830,21 +830,6 @@ def _literal(text: str):
         return text
 
 
-def _detect_lan_ip() -> str | None:
-    """The address this Pi would use to reach the rest of the network --
-    found without actually sending anything (a UDP "connect" just asks the
-    kernel which local address would carry that traffic), which is also why
-    it works with no internet access and 10.255.255.255 need not exist."""
-    import socket
-
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.connect(("10.255.255.255", 1))
-            return sock.getsockname()[0]
-    except OSError:
-        return None
-
-
 def cmd_enable_https(args) -> int:
     """Write a self-signed certificate and point http.tls_cert/tls_key at
     it, so the web interface answers on https:// instead of http://.
@@ -856,59 +841,37 @@ def cmd_enable_https(args) -> int:
     is remembered after that. For a frame reachable from outside the house,
     a real certificate (e.g. from a reverse proxy that already has one)
     belongs in these same two settings instead.
+
+    The same steps are also reachable without a terminal, from the Web
+    interface card's "Enable HTTPS" button on the settings page -- see
+    ``picframe3.tls.enable_https``, which both call.
     """
     setup_logging(args.log_level or "WARNING", "", False)
-    import socket
-    import subprocess
+    from . import tls as tls_module
 
     config = Config.load(args.config)
-    base_dir = os.path.dirname(os.path.abspath(
-        config.source_path or os.path.expanduser(DEFAULT_CONFIG_PATHS[0])))
-    tls_dir = os.path.join(base_dir, "tls")
-    os.makedirs(tls_dir, exist_ok=True)
-    cert_path = os.path.join(tls_dir, "cert.pem")
-    key_path = os.path.join(tls_dir, "key.pem")
-    hostname = socket.gethostname()
-    lan_ip = _detect_lan_ip()
+    result = tls_module.enable_https(config, force=args.force)
+    if not result.ok:
+        print(result.error)
+        return 1
 
-    if os.path.exists(cert_path) and os.path.exists(key_path) and not args.force:
-        print(f"{cert_path} already exists; pass --force to write a new one")
-    else:
-        names = ["DNS:localhost", f"DNS:{hostname}", "IP:127.0.0.1"]
-        if lan_ip:
-            names.append(f"IP:{lan_ip}")
-        try:
-            subprocess.run(
-                ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
-                 "-keyout", key_path, "-out", cert_path, "-days", "3650",
-                 "-subj", f"/CN={hostname}",
-                 "-addext", f"subjectAltName={','.join(names)}"],
-                check=True, capture_output=True, text=True)
-        except FileNotFoundError:
-            print("openssl is not installed. Install it (sudo apt-get install "
-                  "openssl) and run this again -- or point http.tls_cert and "
-                  "http.tls_key at a certificate of your own.")
-            return 1
-        except subprocess.CalledProcessError as exc:
-            print(f"openssl could not write a certificate:\n{exc.stderr}")
-            return 1
-        os.chmod(key_path, 0o600)
-        print(f"wrote a self-signed certificate to {cert_path}")
-        print(f"  valid 10 years, for {hostname}, localhost, 127.0.0.1"
-              + (f", {lan_ip}" if lan_ip else ""))
-        if not lan_ip:
+    if result.wrote:
+        print(f"wrote a self-signed certificate to {result.cert_path}")
+        print(f"  valid 10 years, for {result.hostname}, localhost, 127.0.0.1"
+              + (f", {result.lan_ip}" if result.lan_ip else ""))
+        if not result.lan_ip:
             print("  (could not detect this Pi's network address -- if it "
                   "doesn't match, pass --force after connecting the network)")
+    else:
+        print(f"{result.cert_path} already exists; pass --force to write a new one")
 
-    config.http.tls_cert = cert_path
-    config.http.tls_key = key_path
-    config.save()
     print(f"\nhttp.tls_cert and http.tls_key set in {config.source_path}")
     print("Restart the frame for this to take effect, then open "
-          f"https://{lan_ip or hostname}:{config.http.port}/ -- the browser "
-          "will warn about the certificate the first time ('not private' / "
-          "'not trusted'); that's expected for a self-signed one. Accept it "
-          "once (Advanced -> Proceed) and it's remembered after that.")
+          f"https://{result.lan_ip or result.hostname}:{config.http.port}/ -- "
+          "the browser will warn about the certificate the first time "
+          "('not private' / 'not trusted'); that's expected for a "
+          "self-signed one. Accept it once (Advanced -> Proceed) and it's "
+          "remembered after that.")
     return 0
 
 

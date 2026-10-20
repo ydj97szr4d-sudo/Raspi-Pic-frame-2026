@@ -217,7 +217,7 @@ def test_the_sections_no_card_claims_are_the_rarely_needed_ones(built):
     test is really asking: is anything important left with no way in?"""
     claimed = {job["section"] for job in built["jobs"]}
     left = {s["name"] for s in built["sections"]} - claimed
-    assert left == {"http", "logging", "health"}
+    assert left == {"logging", "health"}
 
 
 def test_a_summary_survives_an_awkward_configuration():
