@@ -321,6 +321,19 @@ curl -fsSL https://raw.githubusercontent.com/ydj97szr4d-sudo/Raspi-Pic-frame-202
 sudo systemctl restart picframe3@pi
 ```
 
+That updates picframe3 itself. If you also have a source tree checked out
+(rather than only having run the one-liner above) and set up the companion
+services -- the calendar/weather line, motion-triggered screen off, or video
+re-encoding -- `packaging/update.sh` does both in one go: it pulls the
+latest from GitHub, re-runs `install.sh`, and re-runs
+`install_companions.sh` too if `~/.config/picframe3/companions.env` says
+they were ever set up here.
+
+```bash
+cd ~/digital-picture-frame-pi-2026   # wherever you cloned it
+bash packaging/update.sh
+```
+
 An update will not change the version of Pillow, FastAPI or numpy your frame
 runs on across a major release: every dependency in `pyproject.toml` has an
 upper bound, so patch and minor releases (where the security fixes are) arrive
