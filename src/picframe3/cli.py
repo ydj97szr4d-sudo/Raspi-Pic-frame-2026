@@ -830,6 +830,88 @@ def _literal(text: str):
         return text
 
 
+def _detect_lan_ip() -> str | None:
+    """The address this Pi would use to reach the rest of the network --
+    found without actually sending anything (a UDP "connect" just asks the
+    kernel which local address would carry that traffic), which is also why
+    it works with no internet access and 10.255.255.255 need not exist."""
+    import socket
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("10.255.255.255", 1))
+            return sock.getsockname()[0]
+    except OSError:
+        return None
+
+
+def cmd_enable_https(args) -> int:
+    """Write a self-signed certificate and point http.tls_cert/tls_key at
+    it, so the web interface answers on https:// instead of http://.
+
+    A self-signed certificate is not a trusted one -- the browser still
+    shows a warning the first time, because no one but this frame vouches
+    for it. That is expected for a device on your own network with no
+    public domain name, not a sign anything went wrong; accepting it once
+    is remembered after that. For a frame reachable from outside the house,
+    a real certificate (e.g. from a reverse proxy that already has one)
+    belongs in these same two settings instead.
+    """
+    setup_logging(args.log_level or "WARNING", "", False)
+    import socket
+    import subprocess
+
+    config = Config.load(args.config)
+    base_dir = os.path.dirname(os.path.abspath(
+        config.source_path or os.path.expanduser(DEFAULT_CONFIG_PATHS[0])))
+    tls_dir = os.path.join(base_dir, "tls")
+    os.makedirs(tls_dir, exist_ok=True)
+    cert_path = os.path.join(tls_dir, "cert.pem")
+    key_path = os.path.join(tls_dir, "key.pem")
+    hostname = socket.gethostname()
+    lan_ip = _detect_lan_ip()
+
+    if os.path.exists(cert_path) and os.path.exists(key_path) and not args.force:
+        print(f"{cert_path} already exists; pass --force to write a new one")
+    else:
+        names = ["DNS:localhost", f"DNS:{hostname}", "IP:127.0.0.1"]
+        if lan_ip:
+            names.append(f"IP:{lan_ip}")
+        try:
+            subprocess.run(
+                ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                 "-keyout", key_path, "-out", cert_path, "-days", "3650",
+                 "-subj", f"/CN={hostname}",
+                 "-addext", f"subjectAltName={','.join(names)}"],
+                check=True, capture_output=True, text=True)
+        except FileNotFoundError:
+            print("openssl is not installed. Install it (sudo apt-get install "
+                  "openssl) and run this again -- or point http.tls_cert and "
+                  "http.tls_key at a certificate of your own.")
+            return 1
+        except subprocess.CalledProcessError as exc:
+            print(f"openssl could not write a certificate:\n{exc.stderr}")
+            return 1
+        os.chmod(key_path, 0o600)
+        print(f"wrote a self-signed certificate to {cert_path}")
+        print(f"  valid 10 years, for {hostname}, localhost, 127.0.0.1"
+              + (f", {lan_ip}" if lan_ip else ""))
+        if not lan_ip:
+            print("  (could not detect this Pi's network address -- if it "
+                  "doesn't match, pass --force after connecting the network)")
+
+    config.http.tls_cert = cert_path
+    config.http.tls_key = key_path
+    config.save()
+    print(f"\nhttp.tls_cert and http.tls_key set in {config.source_path}")
+    print("Restart the frame for this to take effect, then open "
+          f"https://{lan_ip or hostname}:{config.http.port}/ -- the browser "
+          "will warn about the certificate the first time ('not private' / "
+          "'not trusted'); that's expected for a self-signed one. Accept it "
+          "once (Advanced -> Proceed) and it's remembered after that.")
+    return 0
+
+
 def cmd_sync(args) -> int:
     """Syncthing from a terminal: where it stands, on, off, or re-align it.
 
@@ -1099,6 +1181,13 @@ def build_parser() -> argparse.ArgumentParser:
     conf.add_argument("--get", metavar="KEY")
     conf.add_argument("--set", metavar="KEY=VALUE")
     conf.set_defaults(func=cmd_config)
+
+    https = sub.add_parser("enable-https",
+                           help="write a self-signed certificate and serve the web "
+                                "interface over https:// instead of http://")
+    https.add_argument("--force", action="store_true",
+                       help="write a new certificate even if one is already there")
+    https.set_defaults(func=cmd_enable_https)
 
     syncp = sub.add_parser("sync", help="Syncthing: status, on, off, folder")
     syncp.add_argument("action", nargs="?", default="status",

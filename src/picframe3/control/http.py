@@ -1187,6 +1187,27 @@ class HttpServer:
     async def run(self) -> None:
         import uvicorn
 
+        # Both must be set, and both must actually be there, for TLS to turn
+        # on -- a half-configured pair (one path blank, or a file that was
+        # moved) falls back to plain HTTP with a clear warning rather than
+        # uvicorn refusing to start at all with a stack trace nobody asked
+        # for a certificate to produce.
+        tls_cert, tls_key = self.config.tls_cert, self.config.tls_key
+        ssl_kwargs: dict = {}
+        scheme = "http"
+        if tls_cert and tls_key:
+            if os.path.isfile(tls_cert) and os.path.isfile(tls_key):
+                ssl_kwargs = {"ssl_certfile": tls_cert, "ssl_keyfile": tls_key}
+                scheme = "https"
+            else:
+                _log.warning(
+                    "http.tls_cert/http.tls_key are set but %s; serving "
+                    "plain http:// instead. Run 'picframe3 enable-https' to "
+                    "write a fresh self-signed certificate.",
+                    "neither file exists" if not os.path.isfile(tls_cert)
+                    and not os.path.isfile(tls_key)
+                    else f"{tls_cert if not os.path.isfile(tls_cert) else tls_key} is missing")
+
         config = uvicorn.Config(
             self.api,
             host=self.config.host,
@@ -1199,9 +1220,10 @@ class HttpServer:
             # deadline, and being unable to say "busy" is how an open interface
             # turns a burst of requests into a stutter on the wall.
             limit_concurrency=LIMIT_CONCURRENCY,
+            **ssl_kwargs,
         )
         server = uvicorn.Server(config)
-        _log.info("web interface on http://%s:%d/", self.config.host, self.config.port)
+        _log.info("web interface on %s://%s:%d/", scheme, self.config.host, self.config.port)
         if self.config.host in ("0.0.0.0", "::") and not self.config.auth_user:
             # Deliberate, and the right default for a picture frame -- but it
             # should be a thing the owner knows rather than a thing he finds

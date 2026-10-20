@@ -331,6 +331,15 @@ class HttpConfig:
     #: address ranges and its own hostname.  Only needed behind a reverse
     #: proxy or on a router with an unusual local domain.
     allowed_hosts: list[str] = field(default_factory=list)
+    #: PEM certificate and private key for serving this page over https://
+    #: instead of http://.  Both empty (the default) means plain HTTP;
+    #: `picframe3 enable-https` writes a self-signed pair and fills these
+    #: in, or point them at your own certificate (e.g. one a reverse proxy
+    #: already has) by hand. Leaving only one set is treated as neither
+    #: being set -- a half-configured pair would otherwise fail at startup
+    #: with a stack trace instead of a clear message.
+    tls_cert: str = ""
+    tls_key: str = ""
 
 
 @dataclass
