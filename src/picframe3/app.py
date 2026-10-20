@@ -140,6 +140,8 @@ class PicFrame:
         self._backfilling = False
         self._face_backfill_at = 0.0
         self._face_backfilling = False
+        self._phash_backfill_at = 0.0
+        self._phash_backfilling = False
         #: What the off-schedule last decided, or None when there is no
         #: schedule.  The schedule acts on its edges; between them the display
         #: belongs to whoever last touched it.
@@ -1722,6 +1724,16 @@ class PicFrame:
                 self._face_backfill_at = now
                 asyncio.create_task(self._backfill_face_anchors())
 
+            # Same trickle again, for the similarity hash the library search
+            # uses for "find similar" -- always on (no setting, no optional
+            # dependency: just the Pillow decode the frame already needs),
+            # so a fresh library or one upgraded into this version catches up
+            # the same unhurried way.
+            if (self.scanner is not None and not self._phash_backfilling
+                    and now - self._phash_backfill_at > 20.0):
+                self._phash_backfill_at = now
+                asyncio.create_task(self._backfill_phashes())
+
             if now - self._fps_window >= 5.0:
                 self._fps = self._frames / (now - self._fps_window)
                 self._frames = 0
@@ -1784,6 +1796,17 @@ class PicFrame:
             return
         finally:
             self._face_backfilling = False
+
+    async def _backfill_phashes(self) -> None:
+        if self._phash_backfilling:
+            return
+        self._phash_backfilling = True
+        try:
+            await self.scanner.backfill_phashes_async(limit=10)
+        except Exception:  # pragma: no cover - a corrupt file on disk
+            return
+        finally:
+            self._phash_backfilling = False
 
     def _library_changed(self) -> None:
         if self.playlist is None:

@@ -462,29 +462,74 @@ $("#search").addEventListener("input", () => {
   clearTimeout(libraryTimer);
   libraryTimer = setTimeout(loadLibrary, 250);
 });
+$("#search-from").addEventListener("change", loadLibrary);
+$("#search-to").addEventListener("change", loadLibrary);
 $("#folder").addEventListener("change", loadLibrary);
+
+// "Find similar" replaces the ordinary search rather than sitting beside it
+// -- a hash comparison and a text/date filter answering two different
+// questions about the same grid would be confusing about which one a card
+// is even there because of. Clearing it is just going back to whatever the
+// toolbar still says.
+let similarTo = null;   // { id, name } while active, otherwise null
+
+function showSimilar(id, name) {
+  similarTo = { id, name };
+  $("#library-toolbar").hidden = true;
+  $("#similar-banner").hidden = false;
+  $("#similar-name").textContent = name;
+  loadLibrary();
+}
+
+function clearSimilar() {
+  similarTo = null;
+  $("#library-toolbar").hidden = false;
+  $("#similar-banner").hidden = true;
+  loadLibrary();
+}
+$("#similar-clear").addEventListener("click", clearSimilar);
 
 async function loadLibrary() {
   loadFilterOptions();
-  const q = $("#search").value.trim();
   const folder = $("#folder").value;
-  const selected = $("#only-selected").checked ? "&selected=1" : "";
-  let photos = await api(
-    `/api/library/photos?limit=120&q=${encodeURIComponent(q)}${selected}`);
+  let photos;
+  if (similarTo) {
+    photos = await api(`/api/library/photo/${similarTo.id}/similar?limit=120`);
+  } else {
+    const q = $("#search").value.trim();
+    const from = $("#search-from").value;
+    const to = $("#search-to").value;
+    const selected = $("#only-selected").checked ? "&selected=1" : "";
+    const dates = (from ? `&date_from=${from}` : "") + (to ? `&date_to=${to}` : "");
+    photos = await api(
+      `/api/library/photos?limit=120&q=${encodeURIComponent(q)}${selected}${dates}`);
+  }
   if (folder) photos = photos.filter((p) => p.folder === folder);
   const grid = $("#grid");
   grid.innerHTML = "";
   $("#grid-empty").hidden = photos.length > 0;
+  $("#grid-empty").textContent = similarTo && !photos.length
+    ? "Nothing alike yet -- new arrivals are hashed a few at a time in the background."
+    : "Nothing matches.";
   for (const p of photos) {
     const card = document.createElement("figure");
     card.className = "card";
     card.title = p.path;
     card.innerHTML =
+      (p.is_video ? "" : `<button class="similar-btn" type="button"
+         title="Find photos that look like this one">Similar</button>`) +
       `<img loading="lazy" src="${thumbUrl(p)}" alt="">` +
       (p.is_video ? `<span class="badge">video</span>` : "") +
       `<figcaption>${escapeHtml(p.title || p.basename)}</figcaption>`;
     card.querySelector("img").onload = (e) => e.target.classList.add("ready");
     card.onclick = () => send("jump", { id: p.id });
+    const simBtn = card.querySelector(".similar-btn");
+    if (simBtn) {
+      simBtn.onclick = (e) => {
+        e.stopPropagation();
+        showSimilar(p.id, p.title || p.basename);
+      };
+    }
     grid.appendChild(card);
   }
   if ($("#folder").options.length <= 1) {

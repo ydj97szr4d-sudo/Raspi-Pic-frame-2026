@@ -790,8 +790,18 @@ class HttpServer:
 
         @api.get("/api/library/photos", dependencies=guard)
         async def photos(q: str = "", limit: int = Query(60, le=500), offset: int = 0,
-                         selected: bool = False):
-            records = await _in_thread(self._photos, q, limit, offset, selected)
+                         selected: bool = False, date_from: str = "", date_to: str = ""):
+            records = await _in_thread(self._photos, q, limit, offset, selected,
+                                       date_from, date_to)
+            return [_summary(r) for r in records]
+
+        @api.get("/api/library/photo/{file_id}/similar", dependencies=guard)
+        async def similar(file_id: int, limit: int = Query(60, le=200)):
+            """Pictures whose dHash is closest to this one's -- see
+            media.phash. An empty list means either nothing alike was found
+            or this picture hasn't been hashed yet (new arrivals catch up a
+            few at a time in the background; see Scanner.backfill_phashes)."""
+            records = await _in_thread(self.app.library.similar, file_id, limit)
             return [_summary(r) for r in records]
 
         @api.get("/api/library/photo/{file_id}", dependencies=guard)
@@ -1126,14 +1136,19 @@ class HttpServer:
                           for p, n in self.app.library.locations()[:200]],
         }
 
-    def _photos(self, q: str, limit: int, offset: int, selected: bool) -> list:
+    def _photos(self, q: str, limit: int, offset: int, selected: bool,
+               date_from: str = "", date_to: str = "") -> list:
         """The library grid's page of records.  Called in a thread."""
+        from ..library.playlist import parse_date
+
+        taken_from = parse_date(date_from) if date_from else None
+        taken_to = parse_date(date_to, end_of_day=True) if date_to else None
         if selected:
             # Exactly what the slideshow is drawing from, in the same order
             # the grid shows everything else: newest first.  A search inside
             # the selection reads further down it before trimming, so
             # searching does not silently look at one page.
-            reach = min(limit * 10, 2000) if q else limit
+            reach = min(limit * 10, 2000) if (q or taken_from or taken_to) else limit
             ids = self.app.playlist.selection(limit=reach, offset=offset)
             records = [r for r in (self.app.library.get(i) for i in ids)
                        if r is not None]
@@ -1141,10 +1156,18 @@ class HttpServer:
                 needle = q.casefold()
                 records = [r for r in records if needle in " ".join(
                     str(x) for x in (r.basename, r.title, r.caption, r.location,
-                                     *(r.tags or ()))).casefold()][:limit]
-            return records
+                                     *(r.tags or ()))).casefold()]
+            if taken_from is not None or taken_to is not None:
+                records = [r for r in records
+                           if (lambda t: (taken_from is None or t >= taken_from)
+                               and (taken_to is None or t <= taken_to))
+                           (r.taken_at if r.taken_at is not None else r.mtime)]
+            return records[:limit]
         if q:
-            return self.app.library.search(q, limit=limit)
+            return self.app.library.search(q, limit=limit,
+                                           taken_from=taken_from, taken_to=taken_to)
+        if taken_from is not None or taken_to is not None:
+            return self.app.library.by_date(taken_from, taken_to, limit=limit, offset=offset)
         return self.app.library.query(
             "SELECT * FROM files WHERE hidden=0 "
             "ORDER BY COALESCE(taken_at, mtime) DESC LIMIT ? OFFSET ?",

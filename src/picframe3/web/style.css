@@ -37,15 +37,14 @@
    The palette itself is flat and near-monochrome with one red doing all the
    pointing: no gradients, no shadows, no rounded corners, hairlines between
    cells and a heavy rule where the page changes subject. */
-:root {
-  /* Overridden live by app.js from config.appearance when the owner has set
-     a font or accent colour of their own; this is the page's own default,
-     unrelated to light/dark, so it lives outside the two palette blocks. */
-  --font-family: "Archivo", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-                 Roboto, sans-serif;
-}
 :root, :root[data-theme="light"] {
   color-scheme: light;
+  /* Overridden live by app.js from config.appearance when the owner has set
+     a font or accent colour of their own; this is the page's own default,
+     unrelated to light/dark, which is why it is the same in both palettes
+     below rather than living outside them. */
+  --font-family: "Archivo", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+                 Roboto, sans-serif;
   --bg: #f3f2f2;
   --panel: #ffffff;
   --panel-2: #eae7e7;
@@ -80,6 +79,8 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
+  --font-family: "Archivo", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+                 Roboto, sans-serif;
   --bg: #171514;
   --panel: #201e1d;
   --panel-2: #2b2827;
@@ -113,6 +114,8 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
     color-scheme: dark;
+    --font-family: "Archivo", ui-sans-serif, system-ui, -apple-system,
+                   "Segoe UI", Roboto, sans-serif;
     --bg: #171514; --panel: #201e1d; --panel-2: #2b2827; --line: #3b3736;
     --rule: #efebe8; --text: #f1eeec; --muted: #b3adaa; --faint: #8a8481;
     --accent: #ff5a3c; --accent-ink: #1a0704; --accent-hover: #ff7c63;
@@ -290,6 +293,16 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin-top: 6px; }
   border: 1px solid var(--line); border-radius: 0; padding: 9px 12px;
 }
 .toolbar input { flex: 1 1 260px; }
+.toolbar input[type="date"] { flex: 0 1 150px; }
+/* "Similar to <name>" replaces the grid's own search, the same way a job
+   sheet replaces the settings list -- one thing on screen, not a filter
+   silently stacked on a filter it no longer agrees with. */
+.similar-banner {
+  display: flex; align-items: baseline; gap: 10px; margin: 1px 1px 0;
+  padding: 10px 12px; background: var(--panel-2);
+}
+.similar-banner strong { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis;
+                         white-space: nowrap; }
 .grid {
   display: grid; gap: 1px; margin: 1px;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
@@ -314,6 +327,17 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin-top: 6px; }
   letter-spacing: .1em; text-transform: uppercase;
   background: #000a; color: #fff; padding: 3px 7px;
 }
+/* The one action a thumbnail offers besides "show this now" -- out of the
+   way until a cursor is actually over the tile, so the grid still reads as
+   a wall of photographs rather than a toolbar of them. */
+.card .similar-btn {
+  position: absolute; top: 5px; left: 5px; z-index: 1;
+  font-size: 10px; font-weight: 700; letter-spacing: .04em;
+  background: #000a; color: #fff; border: 0; padding: 4px 7px;
+  opacity: 0; transition: opacity .15s;
+}
+.card:hover .similar-btn, .card .similar-btn:focus-visible { opacity: 1; }
+.card .similar-btn:hover { background: var(--accent); }
 
 /* ---- removed ----
    A row, not a tile.  The picture is half the point here; the other half is

@@ -145,13 +145,21 @@
       </div>
     </section>
 
-    <div class="toolbar">
-      <input id="search" type="search" placeholder="Search titles, captions, tags, places…" autocomplete="off">
+    <div class="toolbar" id="library-toolbar">
+      <input id="search" type="search"
+             placeholder="Search by name, title, caption, tags, places…" autocomplete="off">
+      <input id="search-from" type="date" title="Taken from">
+      <input id="search-to" type="date" title="Taken until">
       <select id="folder"><option value="">All folders</option></select>
       <label class="inline"><input id="only-selected" type="checkbox">
         Only the ones the frame is showing</label>
       <button id="rescan" class="btn">Rescan</button>
     </div>
+    <p id="similar-banner" class="similar-banner" hidden>
+      <span class="kicker">Similar to</span>
+      <strong id="similar-name"></strong>
+      <button id="similar-clear" class="btn" type="button">Back to search</button>
+    </p>
     <div id="grid" class="grid"></div>
     <p id="grid-empty" class="empty" hidden>Nothing matches.</p>
   </section>

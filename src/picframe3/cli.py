@@ -451,6 +451,10 @@ def cmd_doctor(args) -> int:
             if pending:
                 print(f"     → {pending} photo(s) still waiting on a face search; "
                       "it runs a few at a time while the frame is on")
+        pending_phash = library.count_phash_missing() if stats["files"] else 0
+        if pending_phash:
+            print(f"     → {pending_phash} photo(s) still waiting on a similarity "
+                  "hash (for \"find similar\"); same trickle, while the frame is on")
         library.close()
     except Exception as exc:
         ok &= check("photo index", False, str(exc))

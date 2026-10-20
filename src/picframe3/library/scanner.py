@@ -13,6 +13,7 @@ from typing import Any
 
 from ..media import face as face_module
 from ..media import metadata
+from ..media import phash as phash_module
 from ..media.geocode import Geocoder
 from ..media.prepare import open_oriented
 from .db import Library
@@ -435,6 +436,31 @@ class Scanner:
     async def backfill_face_anchors_async(self, limit: int = 25) -> int:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._pool, self.backfill_face_anchors, limit)
+
+    # -- similarity hash ------------------------------------------------------
+    def backfill_phashes(self, limit: int = 25) -> int:
+        """Hash a few more pictures that haven't been hashed yet.
+
+        Decoupled from the scan for the same reason geocoding and face
+        detection are: a library of forty thousand photographs should not
+        make a scan wait on forty thousand decodes, and turning this on (or
+        upgrading into it) has to be able to work back through everything
+        already indexed. No model, no network, no dependency that might be
+        missing -- just Pillow, which the frame cannot run without -- so
+        unlike face detection there is no availability check here.
+
+        Returns how many files were looked at, not how many got a usable
+        hash -- a library that finishes backfilling and stays finished is the
+        success case.
+        """
+        pending = self.library.phash_missing(limit)
+        for file_id, path in pending:
+            self.library.set_phash(file_id, phash_module.compute(path))
+        return len(pending)
+
+    async def backfill_phashes_async(self, limit: int = 25) -> int:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._pool, self.backfill_phashes, limit)
 
     def resolve_location(self, lat: float | None, lon: float | None) -> str | None:
         """One lookup, for the picture that is about to go on screen."""

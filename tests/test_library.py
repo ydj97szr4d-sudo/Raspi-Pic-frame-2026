@@ -180,9 +180,10 @@ def test_an_old_index_upgrades_in_place(tmp_path):
     upgraded = Library(str(path))
     columns = {r[1] for r in upgraded.connect().execute("PRAGMA table_info(files)")}
     assert {"play_round", "held", "digest",
-            "face_x0", "face_y0", "face_x1", "face_y1", "face_checked"} <= columns
+            "face_x0", "face_y0", "face_x1", "face_y1", "face_checked",
+            "phash", "phash_checked"} <= columns
     assert upgraded.connect().execute(
-        "SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == "5"
+        "SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == "6"
     # The held-out list is part of the upgrade, not only its two columns.
     upgraded.hold("abc", size=7, path="/pics/a.jpg", stored_as="a.jpg")
     assert upgraded.held_sizes() == {7}

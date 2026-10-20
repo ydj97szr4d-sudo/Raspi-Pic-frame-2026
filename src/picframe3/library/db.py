@@ -28,10 +28,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..media.metadata import PhotoMeta
+from ..media.phash import hamming as _hamming64
 
 _log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 _SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -92,6 +93,12 @@ CREATE TABLE IF NOT EXISTS files (
     face_x1       REAL,
     face_y1       REAL,
     face_checked  INTEGER NOT NULL DEFAULT 0,
+    -- A difference-hash of the picture, for "find similar" -- see
+    -- media.phash.  NULL until phash_checked is set; still NULL after that
+    -- means the file could not be decoded (or is a video), the same
+    -- "looked, found nothing" distinction face_checked makes.
+    phash         INTEGER,
+    phash_checked INTEGER NOT NULL DEFAULT 0,
     indexed_at    REAL    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS files_folder  ON files(folder);
@@ -174,7 +181,8 @@ _COLUMNS = (
     "lens", "f_number", "exposure_time", "iso", "focal_length", "latitude",
     "longitude", "location", "title", "caption", "rating", "duration",
     "play_count", "last_played", "hidden", "held", "digest",
-    "face_x0", "face_y0", "face_x1", "face_y1", "face_checked", "indexed_at",
+    "face_x0", "face_y0", "face_x1", "face_y1", "face_checked",
+    "phash", "indexed_at",
 )
 
 
@@ -219,6 +227,7 @@ class Record:
     face_x1: float | None
     face_y1: float | None
     face_checked: bool
+    phash: int | None
     indexed_at: float
     tags: list[str] = None  # type: ignore[assignment]
 
@@ -305,6 +314,7 @@ class Library:
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("PRAGMA foreign_keys=ON")
             conn.execute("PRAGMA busy_timeout=15000")
+            conn.create_function("hamming64", 2, _hamming64, deterministic=True)
             self._local.conn = conn
             with self._conns_lock:
                 self._conns.append(conn)
@@ -413,6 +423,17 @@ class Library:
                 conn.execute("ALTER TABLE files ADD COLUMN face_y1 REAL")
                 conn.execute("UPDATE files SET face_checked=0")
             _log.info("index upgraded to schema v5 (face box replaces face anchor point)")
+        # v6 added the similarity hash: files.phash / files.phash_checked, on
+        # the same "not yet looked at" starting state as face_checked above --
+        # an older index backfills it the first time it is opened with this
+        # version, a few pictures at a time, the same way face detection and
+        # geocoding caught up on a library that predated them.
+        if "phash_checked" not in columns:
+            with self.transaction():
+                conn.execute("ALTER TABLE files ADD COLUMN phash INTEGER")
+                conn.execute("ALTER TABLE files ADD COLUMN "
+                             "phash_checked INTEGER NOT NULL DEFAULT 0")
+            _log.info("index upgraded to schema v6 (added phash, phash_checked)")
         with self.transaction():
             conn.execute("CREATE INDEX IF NOT EXISTS files_round ON files(play_round)")
             # Unconditional (unlike the ALTERs above) so a fresh database --
@@ -420,6 +441,8 @@ class Library:
             # v4 branch above -- gets the index too.
             conn.execute("CREATE INDEX IF NOT EXISTS files_face_checked "
                          "ON files(face_checked)")
+            conn.execute("CREATE INDEX IF NOT EXISTS files_phash_checked "
+                         "ON files(phash_checked)")
             # The indices below are the ones the playlist's ORDER BY clauses
             # actually use.  files_hidden and files_portrait never were: both
             # columns hold two values over the whole library, so SQLite reads
@@ -499,6 +522,10 @@ class Library:
                     -- a fresh look rather than keeping a crop shaped around a
                     -- photograph this file no longer is.
                     face_x0=NULL, face_y0=NULL, face_x1=NULL, face_y1=NULL, face_checked=0,
+                    -- Same reasoning, same pattern: new bytes means whatever
+                    -- was there before (if anything) is a hash of a picture
+                    -- this file no longer is.
+                    phash=NULL, phash_checked=0,
                     folder=excluded.folder, basename=excluded.basename, ext=excluded.ext,
                     mtime=excluded.mtime, size=excluded.size, is_video=excluded.is_video,
                     width=excluded.width, height=excluded.height,
@@ -942,6 +969,67 @@ class Library:
             "AND is_video=0 AND hidden=0 AND held=0"
         ).fetchone()["n"]
 
+    def phash_missing(self, limit: int = 25) -> list[tuple[int, str]]:
+        """Pictures that have not had a similarity hash computed yet.
+
+        Same shape as faces_missing(): videos are excluded (there is no
+        single frame to hash), and so are hidden and held-out files, which
+        will never be offered as "similar to this" or as a result either.
+        """
+        rows = self.connect().execute(
+            "SELECT id, path FROM files WHERE phash_checked=0 "
+            "AND is_video=0 AND hidden=0 AND held=0 "
+            "ORDER BY COALESCE(taken_at, mtime) DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [(r["id"], r["path"]) for r in rows]
+
+    def count_phash_missing(self) -> int:
+        return self.connect().execute(
+            "SELECT COUNT(*) AS n FROM files WHERE phash_checked=0 "
+            "AND is_video=0 AND hidden=0 AND held=0"
+        ).fetchone()["n"]
+
+    def set_phash(self, file_id: int, value: int | None) -> None:
+        """Record a similarity hash's result -- found, or confirmed empty.
+
+        ``value=None`` is recorded the same as a found hash (phash_checked=1
+        either way), the same reason set_face_box() does: a picture that
+        could not be decoded should not be retried on every backfill pass
+        for the rest of the library's life.
+        """
+        with self.transaction() as conn:
+            conn.execute(
+                "UPDATE files SET phash=?, phash_checked=1 WHERE id=?",
+                (value, file_id),
+            )
+
+    def similar(self, file_id: int, limit: int = 60) -> list[Record]:
+        """The pictures whose hash is closest to this one's, closest first.
+
+        A full scan of every hashed row, ranked through the hamming64()
+        function registered in connect() -- fine at the few thousand rows a
+        picture frame's library actually holds (each comparison is a handful
+        of machine instructions), and simpler than maintaining a second index
+        structure for a feature that is only ever asked about one photograph
+        at a time. Excludes videos, hidden and held-out files, and the
+        picture itself; a hash this picture does not have (not yet computed,
+        or never could be) means there is nothing to rank it against.
+        """
+        row = self.connect().execute(
+            "SELECT phash FROM files WHERE id=?", (file_id,)
+        ).fetchone()
+        if row is None or row["phash"] is None:
+            return []
+        rows = self.connect().execute(
+            "SELECT *, hamming64(phash, ?) AS distance FROM files "
+            "WHERE phash IS NOT NULL AND id != ? "
+            "AND is_video=0 AND hidden=0 AND held=0 "
+            "ORDER BY distance ASC, COALESCE(taken_at, mtime) DESC LIMIT ?",
+            (row["phash"], file_id, limit),
+        ).fetchall()
+        return [self._hydrate(r) for r in rows]
+
     def count_locations_missing(self) -> int:
         return self.connect().execute(
             "SELECT COUNT(*) AS n FROM files WHERE latitude IS NOT NULL "
@@ -956,22 +1044,55 @@ class Library:
             conn.execute("UPDATE search SET location = ''")
         return count
 
-    def search(self, text: str, limit: int = 200) -> list[Record]:
+    def search(self, text: str, limit: int = 200, *,
+               taken_from: float | None = None,
+               taken_to: float | None = None) -> list[Record]:
+        """Title, caption, tags, place and filename -- plus, if given, a
+        "taken on" range, so a name search and a date range narrow the same
+        result together rather than one replacing the other."""
         if not text.strip():
             return []
         query = fts_query(text)
         if not query:
             return []
+        clauses = ["search MATCH ?", "f.hidden=0", "f.held=0"]
+        params: list[Any] = [query]
+        if taken_from is not None:
+            clauses.append("COALESCE(f.taken_at, f.mtime) >= ?")
+            params.append(taken_from)
+        if taken_to is not None:
+            clauses.append("COALESCE(f.taken_at, f.mtime) <= ?")
+            params.append(taken_to)
+        params.append(limit)
         try:
             rows = self.connect().execute(
                 "SELECT f.* FROM search s JOIN files f ON f.id=s.rowid "
-                "WHERE search MATCH ? AND f.hidden=0 AND f.held=0 ORDER BY rank LIMIT ?",
-                (query, limit),
+                f"WHERE {' AND '.join(clauses)} ORDER BY rank LIMIT ?",
+                params,
             ).fetchall()
         except sqlite3.OperationalError as exc:
             _log.debug("search query rejected: %s", exc)
             return []
         return [self._hydrate(r) for r in rows]
+
+    def by_date(self, taken_from: float | None, taken_to: float | None,
+               limit: int = 200, offset: int = 0) -> list[Record]:
+        """Plain newest-first browsing narrowed to a "taken on" range, for
+        when there is a date but no name or tag to search for."""
+        clauses = ["hidden=0"]
+        params: list[Any] = []
+        if taken_from is not None:
+            clauses.append("COALESCE(taken_at, mtime) >= ?")
+            params.append(taken_from)
+        if taken_to is not None:
+            clauses.append("COALESCE(taken_at, mtime) <= ?")
+            params.append(taken_to)
+        params.extend([limit, offset])
+        return self.query(
+            f"SELECT * FROM files WHERE {' AND '.join(clauses)} "
+            "ORDER BY COALESCE(taken_at, mtime) DESC LIMIT ? OFFSET ?",
+            params,
+        )
 
     def stats(self) -> dict[str, Any]:
         conn = self.connect()
