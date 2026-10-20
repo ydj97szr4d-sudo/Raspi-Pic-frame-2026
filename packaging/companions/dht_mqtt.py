@@ -273,10 +273,10 @@ def _calendar_widget_image(today, font_path, size, grid_size, grid_row_gap,
     to the date line, the weekday headers and the day numbers alike.
     holiday_color is an (r, g, b) tuple too, already resolved from the
     calendar.holiday_color palette name by the caller. The "today"
-    highlight circle is always drawn solid in text_color (at full
-    strength, so it stands out as a highlight rather than fading with the
-    rest), with its own day-number switched to black or white for contrast
-    against it."""
+    highlight is a sharp-edged square, always drawn solid in text_color
+    (at full strength, so it stands out as a highlight rather than fading
+    with the rest), with its own day-number switched to black or white
+    for contrast against it."""
     try:
         date_font = ImageFont.truetype(font_path, size)
         grid_font = ImageFont.truetype(font_path, grid_size)
@@ -376,10 +376,12 @@ def _calendar_widget_image(today, font_path, size, grid_size, grid_row_gap,
         draw.text((cx - lw / 2, grid_top), label, font=grid_font,
                   fill=holiday_header_rgba if is_sunday else header_rgba)
 
-    # The "today" highlight stays a circle (not stretched into an oval even
-    # when columns are wider than tall), sized to the smaller of the two
-    # and centred within its own column/row.
-    highlight_d = min(cell_w, cell_h) - 4
+    # The "today" highlight is a sharp-edged square (not stretched into a
+    # rectangle even when columns are wider than tall), sized to the
+    # smaller of the two and centred within its own column/row. A couple
+    # of pixels less inset than before, so it reads as a solid mark rather
+    # than a small dot.
+    highlight_d = min(cell_w, cell_h) - 2
 
     for row, week in enumerate(weeks):
         for col, day in enumerate(week):
@@ -392,9 +394,9 @@ def _calendar_widget_image(today, font_path, size, grid_size, grid_row_gap,
             is_sunday = col == 6
             is_holiday = (today.month, day) in holidays
             if is_today:
-                draw.ellipse([ccx - highlight_d / 2, ccy - highlight_d / 2,
-                              ccx + highlight_d / 2, ccy + highlight_d / 2],
-                            fill=(*text_color, 235))
+                draw.rectangle([ccx - highlight_d / 2, ccy - highlight_d / 2,
+                               ccx + highlight_d / 2, ccy + highlight_d / 2],
+                              fill=(*text_color, 235))
             label = str(day)
             lw = probe.textlength(label, font=grid_font)
             if is_today:
