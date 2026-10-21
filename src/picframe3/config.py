@@ -554,6 +554,17 @@ class OverlayConfig:
     border_width: int = 0
     #: 0 (invisible) - 1 (fully opaque). Only matters when border_width > 0.
     border_opacity: float = 0.9
+    #: Left/centre/right justification of the caption+dot-grid block within
+    #: its own panel. Only visible once min_width_pct stretches the panel
+    #: beyond the content's own width, and only matters when
+    #: background_opacity > 0 -- there is no panel to align within in the
+    #: original drop-shadowed look.
+    align: str = "L"                      # L | C | R
+    #: Stretches the panel to at least this percent of the screen's width
+    #: when the content is narrower. 0 (default) leaves the panel hugging
+    #: the content, as before this existed. Only matters when
+    #: background_opacity > 0.
+    min_width_pct: float = 0.0
 
 
 @dataclass
@@ -641,6 +652,9 @@ class CalendarConfig:
     #: 0 (invisible) - 1 (fully opaque). Only matters when
     #: today_border_width > 0.
     today_border_opacity: float = 0.9
+    #: Left/centre/right justification of the "D: Festival Name" lines
+    #: below the grid, within the widget's own full width.
+    holiday_align: str = "L"              # L | C | R
 
 
 @dataclass
@@ -690,6 +704,15 @@ class ClockConfig:
     border_width: int = 0
     #: 0 (invisible) - 1 (fully opaque). Only matters when border_width > 0.
     border_opacity: float = 0.9
+    #: Left/centre/right justification of the time text within its own
+    #: panel. Only visible once min_width_pct stretches the panel beyond
+    #: the text's own width -- at min_width_pct 0 the panel always hugs
+    #: the text exactly and this has nothing to align within.
+    align: str = "L"                      # L | C | R
+    #: Stretches the panel to at least this percent of the screen's width
+    #: when the time text is narrower. 0 (default) leaves the panel
+    #: hugging the text, as before this existed.
+    min_width_pct: float = 0.0
 
 
 @dataclass
@@ -727,6 +750,14 @@ class StatusConfig:
     border_width: int = 0
     #: 0 (invisible) - 1 (fully opaque). Only matters when border_width > 0.
     border_opacity: float = 0.9
+    #: Left/centre/right justification of the strip's rows within its own
+    #: panel. Only visible once min_width_pct stretches the panel beyond
+    #: the rows' own width.
+    align: str = "L"                      # L | C | R
+    #: Stretches the panel to at least this percent of the screen's width
+    #: when the strip is narrower. 0 (default) leaves the panel hugging
+    #: the content, as before this existed.
+    min_width_pct: float = 0.0
 
 
 @dataclass

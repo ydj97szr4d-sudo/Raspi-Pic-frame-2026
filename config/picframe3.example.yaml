@@ -566,6 +566,14 @@ overlay:
   border_color: [255, 255, 255]
   border_width: 0         # Outline thickness in pixels. 0 (default) draws no outline.
   border_opacity: 0.9     # 0–1. Only matters when border_width > 0.
+  # Left, centre or right justification of the caption+dot-grid block within
+  # its own panel. Only visible once min_width_pct stretches the panel
+  # beyond the content's own width, and only when background_opacity > 0.
+  align: L
+  # Stretches the panel to at least this percent of the screen's width when
+  # the content is narrower. 0 leaves it hugging the content. Only matters
+  # when background_opacity > 0.
+  min_width_pct: 0.0
 
 # The upper-left calendar widget: today's date and a small month grid.
 calendar:
@@ -625,6 +633,9 @@ calendar:
   today_border_width: 0   # Outline thickness in pixels. 0 (default) draws no outline.
   # 0–1. Only matters when today_border_width > 0.
   today_border_opacity: 0.9
+  # Left, centre or right justification of the “D: Festival Name” lines
+  # below the grid, within the widget's own full width.
+  holiday_align: L
 
 # A custom-drawn clock with its own translucent panel.
 clock:
@@ -656,6 +667,13 @@ clock:
   border_color: [255, 255, 255]
   border_width: 0         # Outline thickness in pixels. 0 (default) draws no outline.
   border_opacity: 0.9     # 0–1. Only matters when border_width > 0.
+  # Left, centre or right justification of the time text within its own
+  # panel. Only visible once min_width_pct stretches the panel beyond the
+  # text's own width.
+  align: L
+  # Stretches the panel to at least this percent of the screen's width when
+  # the time text is narrower. 0 leaves it hugging the text.
+  min_width_pct: 0.0
 
 # A small status strip -- outdoor sensor link, and more to come.
 status:
@@ -677,6 +695,13 @@ status:
   border_color: [255, 255, 255]
   border_width: 0         # Outline thickness in pixels. 0 (default) draws no outline.
   border_opacity: 0.9     # 0–1. Only matters when border_width > 0.
+  # Left, centre or right justification of the strip's rows within its own
+  # panel. Only visible once min_width_pct stretches the panel beyond the
+  # rows' own width.
+  align: L
+  # Stretches the panel to at least this percent of the screen's width when
+  # the strip is narrower. 0 leaves it hugging the content.
+  min_width_pct: 0.0
 
 # The small animated maker's mark in a corner of the screen.
 brand:

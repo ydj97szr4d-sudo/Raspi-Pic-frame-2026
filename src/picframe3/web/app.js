@@ -1411,12 +1411,17 @@ function drawSheetExtra(job) {
   const box = $("#sheet-extra");
   stopSyncPolling();
   stopWifiPolling();
-  if (!job || (job.name !== "sync" && job.name !== "wifi" && job.name !== "http")) {
+  if (!job || (job.name !== "sync" && job.name !== "wifi" && job.name !== "http" &&
+               job.name !== "uniform_style")) {
     box.hidden = true;
     box.innerHTML = "";
     return;
   }
   box.hidden = false;
+  if (job.name === "uniform_style") {
+    drawUniformStyle();
+    return;
+  }
   if (job.name === "sync") {
     box.innerHTML = `<div class="panel"><p class="muted">Asking Syncthing…</p></div>`;
     refreshSync();
@@ -1431,6 +1436,146 @@ function drawSheetExtra(job) {
   }
   box.innerHTML = `<div class="panel"><p class="muted">Looking for networks…</p></div>`;
   refreshWifi();
+}
+
+/* ---- Uniform style -------------------------------------------------------
+   Every overlay widget (Calendar, Clock, Status strip, Weather overlay,
+   the picture caption's own panel) carries its own text colour, font,
+   outline colour/width/opacity -- by design, so each can look different.
+   This card is the shortcut for the opposite case: pick one look, press
+   Apply, and it is copied into every target's own fields in one request.
+   After that it is a one-shot action, not a mode -- each widget's fields
+   are exactly as if they had been typed in one at a time, and editing any
+   of them afterward sticks, same as any other setting. */
+const UNIFORM_TARGETS = {
+  calendar: { label: "Calendar", text_color: "calendar.text_color", font: "calendar.font_family",
+             border_color: "calendar.border_color", border_width: "calendar.border_width",
+             border_opacity: "calendar.border_opacity" },
+  clock: { label: "Clock", text_color: "clock.text_color", font: "clock.font_family",
+          border_color: "clock.border_color", border_width: "clock.border_width",
+          border_opacity: "clock.border_opacity" },
+  status: { label: "Status strip", text_color: "status.text_color", font: "status.font_family",
+           border_color: "status.border_color", border_width: "status.border_width",
+           border_opacity: "status.border_opacity" },
+  overlay: { label: "Weather overlay", font: "overlay.font_family",
+            border_color: "overlay.border_color", border_width: "overlay.border_width",
+            border_opacity: "overlay.border_opacity" },
+  viewer: { label: "Picture caption", text_color: "viewer.text_color",
+           font: "viewer.text_font_family", border_color: "viewer.text_panel_border_color",
+           border_width: "viewer.text_panel_border_width",
+           border_opacity: "viewer.text_panel_border_opacity" },
+};
+
+function drawUniformStyle() {
+  const box = $("#sheet-extra");
+  const byKey = fieldsByKey();
+  const fontChoices = (byKey["calendar.font_family"]?.choices || [""]);
+  const fontOpts = fontChoices.map((name) =>
+    `<option value="${escapeHtml(name)}">${escapeHtml(name || "(frame's own font)")}</option>`
+  ).join("");
+  const rows = Object.entries(UNIFORM_TARGETS).map(([id, t]) => `
+    <label class="uniform-target">
+      <input type="checkbox" data-uniform-target="${id}" checked>
+      <span>${escapeHtml(t.label)}</span>
+    </label>`).join("");
+  box.innerHTML = `<div class="panel">
+    <p class="muted">Pick a look once, then apply it to every widget's own
+      settings below. Each one keeps its own fields afterward -- tweak any
+      of them individually later and it stays that way.</p>
+    <div class="field">
+      <label>Text colour</label>
+      <input type="text" id="uniform-text-color" placeholder="e.g. 255, 255, 255"
+             data-kind="numbers">
+      <div class="hint">Red, green, blue, 0–255. Left blank to leave text
+        colour alone. Has no effect on Weather overlay, whose caption text
+        has no colour setting of its own.</div>
+    </div>
+    <div class="field">
+      <label>Font</label>
+      <select id="uniform-font">${fontOpts}</select>
+    </div>
+    <div class="field">
+      <label>Outline colour</label>
+      <input type="text" id="uniform-border-color" placeholder="e.g. 255, 255, 255"
+             value="255, 255, 255" data-kind="numbers">
+    </div>
+    <div class="field">
+      <label>Outline width (px)</label>
+      <input type="number" id="uniform-border-width" value="0" step="1" min="0">
+    </div>
+    <div class="field">
+      <label>Outline opacity</label>
+      <input type="number" id="uniform-border-opacity" value="0.9" step="0.05" min="0" max="1">
+    </div>
+    <fieldset class="uniform-targets">
+      <legend>Apply to</legend>
+      ${rows}
+    </fieldset>
+    <button class="btn btn-primary" type="button" id="uniform-apply">Apply to selected widgets</button>
+    <p class="muted" id="uniform-result"></p>
+  </div>`;
+  $("#uniform-apply").onclick = applyUniformStyle;
+}
+
+function parseRgb(text) {
+  const t = (text || "").trim();
+  if (!t) return null;
+  const parts = t.split(",").map((s) => Number(s.trim()));
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return undefined;  // invalid
+  return parts;
+}
+
+async function applyUniformStyle() {
+  const result = $("#uniform-result");
+  const textColor = parseRgb($("#uniform-text-color").value);
+  const borderColor = parseRgb($("#uniform-border-color").value);
+  if (textColor === undefined || borderColor === undefined) {
+    result.textContent = "A colour needs exactly three numbers, 0–255, comma separated.";
+    return;
+  }
+  const font = $("#uniform-font").value;
+  const borderWidth = Math.max(0, Math.round(Number($("#uniform-border-width").value) || 0));
+  const borderOpacity = Math.min(1, Math.max(0, Number($("#uniform-border-opacity").value) || 0));
+
+  const targets = Object.keys(UNIFORM_TARGETS).filter((id) => {
+    const el = $("#sheet-extra").querySelector(`[data-uniform-target="${id}"]`);
+    return !!(el && el.checked);
+  });
+  if (!targets.length) {
+    result.textContent = "Pick at least one widget to apply this to.";
+    return;
+  }
+
+  const sets = [];
+  for (const id of targets) {
+    const t = UNIFORM_TARGETS[id];
+    if (textColor && t.text_color) sets.push([t.text_color, textColor]);
+    sets.push([t.font, font]);
+    if (borderColor) sets.push([t.border_color, borderColor]);
+    sets.push([t.border_width, borderWidth]);
+    sets.push([t.border_opacity, borderOpacity]);
+  }
+
+  result.textContent = `Applying to ${targets.length} widget${targets.length === 1 ? "" : "s"}…`;
+  try {
+    for (const [key, value] of sets) {
+      await send("set_config", { key, value });
+    }
+    await api("/api/config?persist=true", { method: "PATCH", body: "{}" });
+    // Refresh the schema and the cards behind this sheet (their state lines
+    // now describe the new values), but deliberately skip redrawing *this*
+    // sheet the way loadSettings() would -- drawSheetExtra() would rebuild
+    // this very panel from scratch and wipe the confirmation below before
+    // anyone reads it.
+    SCHEMA = await api("/api/config/schema");
+    drawJobs();
+    if (!$("#settings-all").hidden) drawSettings();
+    result.textContent = `Applied and saved to ${targets.length} widget` +
+      `${targets.length === 1 ? "" : "s"}.`;
+    $("#saved").textContent = "Saved to the config file.";
+  } catch (err) {
+    result.textContent = `Could not apply: ${err.message}`;
+  }
 }
 
 async function refreshSync() {

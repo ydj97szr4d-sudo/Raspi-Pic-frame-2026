@@ -312,6 +312,8 @@ The weather caption and its idle-countdown dot grid.
 | `border_color` | list of integers | `[255, 255, 255]` | Red, green, blue, 0–255. A stroked outline around the panel. |
 | `border_width` | integer | `0` | Outline thickness in pixels. 0 (default) draws no outline. |
 | `border_opacity` | number | `0.9` | 0–1. Only matters when border_width > 0. |
+| `align` | string | `'L'` | Left, centre or right justification of the caption+dot-grid block within its own panel. Only visible once min_width_pct stretches the panel beyond the content's own width, and only when background_opacity > 0. |
+| `min_width_pct` | number | `0.0` | Stretches the panel to at least this percent of the screen's width when the content is narrower. 0 leaves it hugging the content. Only matters when background_opacity > 0. |
 
 ## `calendar`
 
@@ -344,6 +346,7 @@ The upper-left calendar widget: today's date and a small month grid.
 | `today_border_color` | list of integers | `[255, 255, 255]` | Red, green, blue, 0–255. A stroked outline around the “today” square alone, separate from the whole widget's own border above. |
 | `today_border_width` | integer | `0` | Outline thickness in pixels. 0 (default) draws no outline. |
 | `today_border_opacity` | number | `0.9` | 0–1. Only matters when today_border_width > 0. |
+| `holiday_align` | string | `'L'` | Left, centre or right justification of the “D: Festival Name” lines below the grid, within the widget's own full width. |
 
 ## `clock`
 
@@ -366,6 +369,8 @@ A custom-drawn clock with its own translucent panel.
 | `border_color` | list of integers | `[255, 255, 255]` | Red, green, blue, 0–255. A stroked outline around the panel. |
 | `border_width` | integer | `0` | Outline thickness in pixels. 0 (default) draws no outline. |
 | `border_opacity` | number | `0.9` | 0–1. Only matters when border_width > 0. |
+| `align` | string | `'L'` | Left, centre or right justification of the time text within its own panel. Only visible once min_width_pct stretches the panel beyond the text's own width. |
+| `min_width_pct` | number | `0.0` | Stretches the panel to at least this percent of the screen's width when the time text is narrower. 0 leaves it hugging the text. |
 
 ## `status`
 
@@ -385,6 +390,8 @@ A small status strip -- outdoor sensor link, and more to come.
 | `border_color` | list of integers | `[255, 255, 255]` | Red, green, blue, 0–255. A stroked outline around the panel. |
 | `border_width` | integer | `0` | Outline thickness in pixels. 0 (default) draws no outline. |
 | `border_opacity` | number | `0.9` | 0–1. Only matters when border_width > 0. |
+| `align` | string | `'L'` | Left, centre or right justification of the strip's rows within its own panel. Only visible once min_width_pct stretches the panel beyond the rows' own width. |
+| `min_width_pct` | number | `0.0` | Stretches the panel to at least this percent of the screen's width when the strip is narrower. 0 leaves it hugging the content. |
 
 ## `brand`
 

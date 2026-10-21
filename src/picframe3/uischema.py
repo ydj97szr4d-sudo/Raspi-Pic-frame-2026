@@ -262,6 +262,8 @@ NOTES = {
     "overlay.border_color": "Red, green, blue, 0–255. A stroked outline around the panel.",
     "overlay.border_width": "Outline thickness in pixels. 0 (default) draws no outline.",
     "overlay.border_opacity": "0–1. Only matters when border_width > 0.",
+    "overlay.align": "Left, centre or right justification of the caption+dot-grid block within its own panel. Only visible once min_width_pct stretches the panel beyond the content's own width, and only when background_opacity > 0.",
+    "overlay.min_width_pct": "Stretches the panel to at least this percent of the screen's width when the content is narrower. 0 leaves it hugging the content. Only matters when background_opacity > 0.",
     "calendar.enabled": "Off removes the widget entirely.",
     "calendar.offset_pct": "Inset from the top-left corner, percent of screen width/height — [x, y].",
     "calendar.size": "Size of the “today” line (e.g. “Saturday, 17 October”), in real screen pixels (drawn directly at your screen's own resolution, not through PicFrame3's scaled renderer).",
@@ -287,6 +289,7 @@ NOTES = {
     "calendar.today_border_color": "Red, green, blue, 0–255. A stroked outline around the “today” square alone, separate from the whole widget's own border above.",
     "calendar.today_border_width": "Outline thickness in pixels. 0 (default) draws no outline.",
     "calendar.today_border_opacity": "0–1. Only matters when today_border_width > 0.",
+    "calendar.holiday_align": "Left, centre or right justification of the “D: Festival Name” lines below the grid, within the widget's own full width.",
     "clock.enabled": "Off removes the widget entirely. Turn off viewer.show_clock too if it's on, so you don't get two clocks.",
     "clock.position": "Which corner it's inset from.",
     "clock.offset_pct": "Inset from that corner, percent of screen width/height — [x, y].",
@@ -302,6 +305,8 @@ NOTES = {
     "clock.border_color": "Red, green, blue, 0–255. A stroked outline around the panel.",
     "clock.border_width": "Outline thickness in pixels. 0 (default) draws no outline.",
     "clock.border_opacity": "0–1. Only matters when border_width > 0.",
+    "clock.align": "Left, centre or right justification of the time text within its own panel. Only visible once min_width_pct stretches the panel beyond the text's own width.",
+    "clock.min_width_pct": "Stretches the panel to at least this percent of the screen's width when the time text is narrower. 0 leaves it hugging the text.",
     "status.enabled": "Off removes the strip entirely.",
     "status.position": "Which corner it's inset from.",
     "status.offset_pct": "Inset from that corner, percent of screen width/height — [x, y].",
@@ -314,6 +319,8 @@ NOTES = {
     "status.border_color": "Red, green, blue, 0–255. A stroked outline around the panel.",
     "status.border_width": "Outline thickness in pixels. 0 (default) draws no outline.",
     "status.border_opacity": "0–1. Only matters when border_width > 0.",
+    "status.align": "Left, centre or right justification of the strip's rows within its own panel. Only visible once min_width_pct stretches the panel beyond the rows' own width.",
+    "status.min_width_pct": "Stretches the panel to at least this percent of the screen's width when the strip is narrower. 0 leaves it hugging the content.",
     "brand.enabled": "Off removes the mark entirely.",
     "brand.position": "Which corner it's inset from.",
     "brand.offset_pct": "Inset from that corner, percent of screen width/height — [x, y].",
@@ -407,6 +414,8 @@ LABELS = {
     "overlay.border_color": "Outline colour",
     "overlay.border_width": "Outline width (px)",
     "overlay.border_opacity": "Outline opacity",
+    "overlay.align": "Alignment",
+    "overlay.min_width_pct": "Minimum panel width (%)",
     "calendar.offset_pct": "Inset from top-left (% x, y)",
     "calendar.size": "“Today” text size (px)",
     "calendar.grid_size": "Date grid text size (px)",
@@ -431,6 +440,7 @@ LABELS = {
     "calendar.today_border_color": "“Today” square outline colour",
     "calendar.today_border_width": "“Today” square outline width (px)",
     "calendar.today_border_opacity": "“Today” square outline opacity",
+    "calendar.holiday_align": "Holiday list alignment",
     "clock.position": "Corner",
     "clock.offset_pct": "Inset from corner (% x, y)",
     "clock.size": "Time text size (px)",
@@ -445,6 +455,8 @@ LABELS = {
     "clock.border_color": "Outline colour",
     "clock.border_width": "Outline width (px)",
     "clock.border_opacity": "Outline opacity",
+    "clock.align": "Alignment",
+    "clock.min_width_pct": "Minimum panel width (%)",
     "status.position": "Corner",
     "status.offset_pct": "Inset from corner (% x, y)",
     "status.size": "Status text size (px)",
@@ -456,6 +468,8 @@ LABELS = {
     "status.border_color": "Outline colour",
     "status.border_width": "Outline width (px)",
     "status.border_opacity": "Outline opacity",
+    "status.align": "Alignment",
+    "status.min_width_pct": "Minimum panel width (%)",
     "brand.position": "Corner",
     "brand.offset_pct": "Inset from corner (% x, y)",
     "brand.size": "Mark size (px)",
@@ -706,6 +720,7 @@ LIMITS: dict[str, tuple[float | None, float | None]] = {
     "overlay.background_padding": (0, 200),
     "overlay.border_width": (0, 60),
     "overlay.border_opacity": (0.0, 1.0),
+    "overlay.min_width_pct": (0.0, 100.0),
     "calendar.size": (6, 512),
     "calendar.grid_size": (6, 256),
     "calendar.grid_row_gap": (0, 200),
@@ -726,11 +741,13 @@ LIMITS: dict[str, tuple[float | None, float | None]] = {
     "clock.panel_padding_y": (0, 300),
     "clock.border_width": (0, 60),
     "clock.border_opacity": (0.0, 1.0),
+    "clock.min_width_pct": (0.0, 100.0),
     "status.size": (6, 256),
     "status.text_opacity": (0.0, 1.0),
     "status.background_opacity": (0.0, 1.0),
     "status.border_width": (0, 60),
     "status.border_opacity": (0.0, 1.0),
+    "status.min_width_pct": (0.0, 100.0),
     "brand.size": (16, 1024),
     "brand.opacity": (0.0, 1.0),
 }
@@ -756,6 +773,10 @@ CHOICES: dict[str, list[str]] = {
     "slideshow.video_engine": ["gstreamer", "vlc"],
     "calendar.grid_align_h": ["left", "center", "right"],
     "calendar.grid_align_v": ["top", "center", "bottom"],
+    "calendar.holiday_align": ["L", "C", "R"],
+    "clock.align": ["L", "C", "R"],
+    "status.align": ["L", "C", "R"],
+    "overlay.align": ["L", "C", "R"],
     # A library font name for this widget alone, "" (first) meaning "inherit
     # the frame-wide viewer.font" -- see media/fontlib.py's own CHOICES,
     # which this list is copied from so every widget's dropdown always
@@ -1202,6 +1223,13 @@ def _state_status(c) -> str:
     return f"{st.position}, {_n(x)}%/{_n(y)}% inset · {panel}"
 
 
+def _state_uniform_style(c) -> str:
+    # Not a setting of its own -- a one-shot tool the sheet's own panel
+    # drives (see app.js's drawSheetExtra), so there is nothing to report
+    # back here the way every other card reports its current configuration.
+    return "Copies a look into every widget's own fields -- nothing to show here"
+
+
 def _state_brand(c) -> str:
     b = c.brand
     if not b.enabled:
@@ -1338,7 +1366,8 @@ JOBS = [
                 "overlay.filled_alpha", "overlay.unfilled_alpha",
                 "overlay.background_color", "overlay.background_opacity",
                 "overlay.background_padding", "overlay.font_family",
-                "overlay.border_color", "overlay.border_width", "overlay.border_opacity"]},
+                "overlay.border_color", "overlay.border_width", "overlay.border_opacity",
+                "overlay.align", "overlay.min_width_pct"]},
     {"name": "calendar", "kicker": "Calendar",
      "title": "Today's date and the month grid",
      "section": "calendar", "state": _state_calendar,
@@ -1347,7 +1376,7 @@ JOBS = [
                 "calendar.square_padding",
                 "calendar.text_color", "calendar.text_opacity",
                 "calendar.background_color", "calendar.background_opacity",
-                "calendar.holiday_color", "calendar.font_family",
+                "calendar.holiday_color", "calendar.holiday_align", "calendar.font_family",
                 "calendar.border_color", "calendar.border_width", "calendar.border_opacity",
                 "calendar.divider_width", "calendar.divider_color", "calendar.divider_opacity",
                 "calendar.grid_align_h", "calendar.grid_align_v",
@@ -1363,7 +1392,7 @@ JOBS = [
                 "clock.background_color", "clock.background_opacity",
                 "clock.panel_padding_x", "clock.panel_padding_y",
                 "clock.font_family", "clock.border_color", "clock.border_width",
-                "clock.border_opacity"]},
+                "clock.border_opacity", "clock.align", "clock.min_width_pct"]},
     {"name": "status", "kicker": "Status strip",
      "title": "Outdoor sensor link, and more to come",
      "section": "status", "state": _state_status,
@@ -1371,7 +1400,14 @@ JOBS = [
                 "status.size", "status.text_color", "status.text_opacity",
                 "status.background_color", "status.background_opacity",
                 "status.font_family", "status.border_color", "status.border_width",
-                "status.border_opacity"]},
+                "status.border_opacity", "status.align", "status.min_width_pct"]},
+    {"name": "uniform_style", "kicker": "Uniform style",
+     "title": "Apply one look to every overlay widget",
+     # Anchored on "overlay" (already claimed by the Weather overlay card)
+     # purely so every job points at a real section -- this card's own
+     # fields list is empty on purpose; its whole UI is the custom panel
+     # app.js's drawSheetExtra draws for job.name === "uniform_style".
+     "section": "overlay", "state": _state_uniform_style, "fields": []},
     {"name": "brand", "kicker": "Brand mark",
      "title": "The small animated mark in a corner of the screen",
      "section": "brand", "state": _state_brand,
