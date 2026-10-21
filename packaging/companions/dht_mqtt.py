@@ -313,6 +313,25 @@ HOLIDAY_PALETTE = {
 #: panel's own edge, scaled with the widget's own size setting below.
 _PANEL_PAD_FRAC = 0.45
 
+
+def _trim_to_ink(img):
+    """Crop an RGBA image to its own non-transparent pixels.
+
+    A content image built from a font's ascent+descent (its full
+    line-height metric box) is NOT the same as the box its actual glyphs
+    occupy -- descent alone reserves room for the tallest descender in the
+    font regardless of whether the text drawn has one, so a string of plain
+    digits or capitals (a clock, "Out sensor OK", a day number) leaves a
+    sizeable stripe of blank space at the bottom of that box that a top
+    anchored draw never fills. Centring that box with equal padding on
+    every side then visibly centres the *box*, not the text -- the glyphs
+    end up sitting above centre, every time. Trimming to the real ink (and
+    any shadow blur around it, which also has nonzero alpha and is meant to
+    stay) removes that built-in asymmetry before panel padding is applied,
+    so symmetric padding actually produces a centred result."""
+    bbox = img.getbbox()
+    return img.crop(bbox) if bbox else img
+
 #: How much lighter/darker than the background highlight circle has to read,
 #: on a 0-255 luminance scale, to pick black vs. white for the "today"
 #: number -- lets the circle itself always be drawn in text_color while the
@@ -498,27 +517,34 @@ def _calendar_widget_image(today, font_path, size, grid_size, grid_row_gap,
             is_sunday = col == 6
             is_holiday = (today.month, day) in holidays
             label = str(day)
-            lw = probe.textlength(label, font=grid_font)
+            # The glyph's own ink box (left, top, right, bottom), relative
+            # to wherever draw.text's anchor point lands -- NOT the nominal
+            # advance width/font size, which (same reasoning as
+            # _trim_to_ink above) reserves room a plain digit never uses
+            # and used to leave "21" sitting low and left of its cell/
+            # highlight square's true centre instead of in the middle of
+            # it, regardless of what grid_align_h/v was set to.
+            ink_l, ink_t, ink_r, ink_b = grid_font.getbbox(label)
             if grid_align_h == "left":
-                tx = cx + cell_pad
+                tx = cx + cell_pad - ink_l
             elif grid_align_h == "right":
-                tx = cx + cell_w - lw - cell_pad
+                tx = cx + cell_w - cell_pad - ink_r
             else:
-                tx = ccx - lw / 2
+                tx = ccx - (ink_l + ink_r) / 2
             if grid_align_v == "top":
-                ty = cy + cell_pad
+                ty = cy + cell_pad - ink_t
             elif grid_align_v == "bottom":
-                ty = cy + cell_h - grid_font.size - cell_pad
+                ty = cy + cell_h - cell_pad - ink_b
             else:
-                ty = ccy - grid_font.size / 2
+                ty = ccy - (ink_t + ink_b) / 2
             if is_today:
-                # Centred on the number's OWN anchor (tx/ty/lw), not the
-                # cell's centre -- otherwise grid_align_h/v moves the day
-                # number but leaves the highlight square behind at the
-                # cell's middle, so the two drift apart the moment
+                # Centred on the number's OWN ink (tx/ty plus its bbox),
+                # not the cell's centre -- otherwise grid_align_h/v moves
+                # the day number but leaves the highlight square behind at
+                # the cell's middle, so the two drift apart the moment
                 # alignment is anything but centred.
-                hcx = tx + lw / 2
-                hcy = ty + grid_font.size / 2
+                hcx = tx + (ink_l + ink_r) / 2
+                hcy = ty + (ink_t + ink_b) / 2
                 box = [hcx - highlight_d / 2, hcy - highlight_d / 2,
                       hcx + highlight_d / 2, hcy + highlight_d / 2]
                 draw.rectangle(box, fill=today_fill_rgba)
@@ -548,13 +574,13 @@ def _calendar_widget_image(today, font_path, size, grid_size, grid_row_gap,
     return img
 
 
-def _wrap_in_panel(content, pad, bg_color, bg_opacity, *, radius_frac=0.6, size_based_radius=False,
+def _wrap_in_panel(content, pad, bg_color, bg_opacity, *,
                     border_color=None, border_width=0, border_opacity=1.0,
                     min_width=0, justify="L"):
-    """Common look shared by the calendar, clock and status widgets: a
-    rounded translucent panel sized to `content` plus `pad` on every side,
-    with `content` composited on top. No panel at all (just `content` on
-    its own transparent canvas) when bg_opacity is 0.
+    """Common look shared by the calendar, clock, status and weather-
+    overlay widgets: a rounded translucent panel sized to `content` plus
+    `pad` on every side, with `content` composited on top. No panel at all
+    (just `content` on its own transparent canvas) when bg_opacity is 0.
 
     `pad` is either a single number (same margin on every side) or an
     (x, y) pair -- horizontal margin, vertical margin -- for a widget like
@@ -562,14 +588,14 @@ def _wrap_in_panel(content, pad, bg_color, bg_opacity, *, radius_frac=0.6, size_
     pixel margin on every side reads as barely-there sideways and
     disproportionate top/bottom.
 
-    `radius_frac` scales the corner radius off min(pad_x, pad_y) by default
-    (the calendar/status look, left exactly as it always was).
-
-    `size_based_radius` (the clock) scales off the panel's own shorter side
-    instead, ignoring padding and radius_frac entirely -- padding-based
-    rounding breaks down whenever padding itself is set small/tight (e.g.
-    panel_padding_y pulled down for a snug vertical fit), which otherwise
-    floors the radius near-flat no matter how big the panel actually is.
+    The corner radius always scales off the panel's own shorter side
+    (gfx/overlays.py's _panel_wrap, the caption panel's counterpart to this
+    function, uses the exact same formula, so every widget's corners read
+    the same -- this used to scale off padding instead for every widget but
+    the clock, which made the calendar/status/weather panels read noticeably
+    squarer than the clock/caption ones at typical padding values, and
+    flattened near to a plain rectangle whenever padding was set small/tight
+    regardless of how big the panel actually was).
 
     `border_width` > 0 strokes the same rounded rectangle's outline, in
     `border_color` at `border_opacity`, on top of the fill (or on its own,
@@ -590,10 +616,7 @@ def _wrap_in_panel(content, pad, bg_color, bg_opacity, *, radius_frac=0.6, size_
     widget = Image.new("RGBA", (panel_w, panel_h), (0, 0, 0, 0))
     if bg_opacity > 0 or border_width > 0:
         panel_draw = ImageDraw.Draw(widget)
-        if size_based_radius:
-            radius = max(8, min(60, round(min(panel_w, panel_h) * 0.28)))
-        else:
-            radius = max(4, min(60, round(min(pad_x, pad_y) * radius_frac)))
+        radius = max(8, min(60, round(min(panel_w, panel_h) * 0.28)))
         if bg_opacity > 0:
             bg_alpha = round(255 * bg_opacity)
             panel_draw.rounded_rectangle(
@@ -769,11 +792,16 @@ def write_clock(canvas):
     content = Image.new("RGBA", (text_w, text_h), (0, 0, 0, 0))
     ImageDraw.Draw(content).text((0, 0), time_text, font=clock_font,
                                   fill=(*text_color, text_alpha))
+    # text_h above is ascent+descent -- the font's full line-height
+    # allowance, not how tall "14:07" actually draws. Trimming to the real
+    # ink before panel padding is applied is what makes the time actually
+    # sit in the middle of its panel instead of visibly above centre.
+    content = _trim_to_ink(content)
 
     pad_x = max(0, int(settings.get("panel_padding_x", 40)))
     pad_y = max(0, int(settings.get("panel_padding_y", 16)))
     min_width = round(SCREEN_W * min_width_pct / 100) if min_width_pct > 0 else 0
-    widget = _wrap_in_panel(content, (pad_x, pad_y), bg_color, bg_opacity, size_based_radius=True,
+    widget = _wrap_in_panel(content, (pad_x, pad_y), bg_color, bg_opacity,
                             border_color=border_color, border_width=border_width,
                             border_opacity=border_opacity, min_width=min_width, justify=align)
 
@@ -967,6 +995,12 @@ def write_status(canvas):
             content.alpha_composite(
                 _signal_bars_icon(icon_size, wifi_percent, icon_rgba), (0, y))
         cdraw.text((text_x, y), text, font=status_font, fill=(*text_color, text_alpha))
+
+    # Same reasoning as write_clock's _trim_to_ink call: line_h above is
+    # ascent+descent, not the rows' real visible height, so the strip was
+    # sitting above centre in its panel until this crops it to what's
+    # actually drawn (icons included).
+    content = _trim_to_ink(content)
 
     pad = max(6, round(size * _PANEL_PAD_FRAC))
     min_width = round(SCREEN_W * min_width_pct / 100) if min_width_pct > 0 else 0
@@ -1163,6 +1197,14 @@ def write_overlay(line_text, filled_dots):
                     ink_center = combined_h // 2
                 grid_y = max(0, min(combined_h - grid_img.height, ink_center - grid_img.height // 2))
                 content.alpha_composite(grid_img, (0, grid_y))
+
+            # text/grid are already correctly aligned to each other above,
+            # but combined_h itself is still text_h's nominal ascent+descent
+            # box when that's the taller of the two -- trimming to the
+            # whole block's real ink (same reasoning as write_clock/
+            # write_status) is what makes the *panel's* padding end up
+            # symmetric around what's actually visible, not that box.
+            content = _trim_to_ink(content)
 
             pad = max(0, int(overlay_settings.get("background_padding", 20)))
             bg_color = tuple(int(v) for v in overlay_settings.get("background_color", [0, 0, 0]))

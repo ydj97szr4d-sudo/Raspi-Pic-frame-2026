@@ -124,7 +124,24 @@ def render_text(
     draw = ImageDraw.Draw(img)
     _draw_lines(draw, lines, font, width, pad, line_h, justify,
                 (*style.color, alpha))
-    return img
+    return _trim_to_ink(img)
+
+
+def _trim_to_ink(img: Image.Image) -> Image.Image:
+    """Crop an RGBA image to its own non-transparent pixels (including any
+    shadow blur, which also has nonzero alpha and is meant to stay).
+
+    `line_h` above is built from the font's ascent+descent -- its full
+    line-height allowance, not how tall the text drawn into it actually
+    is. Most captions have no descenders on their last line, so that
+    allowance goes largely unused as blank space at the very bottom of the
+    returned image. Every caller that centres this image (a corner
+    caption's own panel, the bottom caption band) does so using its
+    height, so that unused space reads as the caption sitting above
+    centre rather than in the middle of where it's placed. Trimming here,
+    once, fixes every caller at once."""
+    bbox = img.getbbox()
+    return img.crop(bbox) if bbox else img
 
 
 def _draw_lines(draw, lines, font, width, pad, line_h, justify, fill) -> None:
