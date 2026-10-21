@@ -117,6 +117,49 @@ except OSError:
 _viewer_cfg = (_cfg.get("viewer") or {})
 
 FONT_PATH = _viewer_cfg.get("font") or "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
+#: media.fontlib's catalog, copied by hand rather than imported -- this
+#: script runs in its own standalone venv (packaging/install_companions.sh),
+#: with no picframe3 install to import from, the same reason _wrap_in_panel
+#: below is its own copy of gfx/overlays.py's _panel_wrap rather than a
+#: shared import. Keep this dict in step with
+#: src/picframe3/media/fontlib.py's _LIBRARY by hand.
+_FONT_LIBRARY = {
+    "DejaVu Sans": ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",),
+    "DejaVu Sans Bold": ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",),
+    "DejaVu Sans Oblique": ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf",),
+    "DejaVu Sans Condensed": ("/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed.ttf",),
+    "DejaVu Serif": ("/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",),
+    "DejaVu Serif Bold": ("/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",),
+    "DejaVu Sans Mono": ("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",),
+    "Liberation Sans": ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf"),
+    "Liberation Sans Bold": ("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+                             "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"),
+    "Liberation Sans Italic": ("/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf",
+                               "/usr/share/fonts/truetype/liberation2/LiberationSans-Italic.ttf"),
+    "Liberation Serif": ("/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
+                         "/usr/share/fonts/truetype/liberation2/LiberationSerif-Regular.ttf"),
+    "Liberation Serif Bold": ("/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf",
+                              "/usr/share/fonts/truetype/liberation2/LiberationSerif-Bold.ttf"),
+    "Liberation Mono": ("/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+                        "/usr/share/fonts/truetype/liberation2/LiberationMono-Regular.ttf"),
+    "Noto Sans": ("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",),
+    "Noto Sans Bold": ("/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",),
+    "Noto Serif": ("/usr/share/fonts/truetype/noto/NotoSerif-Regular.ttf",),
+    "FreeSans": ("/usr/share/fonts/truetype/freefont/FreeSans.ttf",),
+}
+
+
+def _resolve_font(name):
+    """The first installed path for a media.fontlib catalog *name*, or
+    FONT_PATH (the frame-wide default) when name is empty, unknown, or none
+    of its candidate files exist here -- a bad per-widget font choice falls
+    back quietly rather than taking a redraw down."""
+    for path in _FONT_LIBRARY.get(name or "", ()):
+        if os.path.exists(path):
+            return path
+    return FONT_PATH
 CLOCK_SIZE = int(_viewer_cfg.get("clock_size", 48))
 CLOCK_OFFSET_PCT = tuple(_viewer_cfg.get("clock_offset_pct", [3.0, 3.0]))
 CLOCK_OPACITY = float(_viewer_cfg.get("clock_opacity", 1.0))
@@ -144,6 +187,10 @@ DEFAULT_OVERLAY_SETTINGS = {
     "background_color": [0, 0, 0],
     "background_opacity": 0.0,   # 0 = old drop-shadowed look, no panel
     "background_padding": 20,
+    "font_family": "",
+    "border_color": [255, 255, 255],
+    "border_width": 0,
+    "border_opacity": 0.9,
 }
 
 
@@ -174,6 +221,20 @@ DEFAULT_CALENDAR_SETTINGS = {
     "background_color": [0, 0, 0],
     "background_opacity": 0.35,
     "holiday_color": "dull_red",
+    "font_family": "",
+    "border_color": [255, 255, 255],
+    "border_width": 0,
+    "border_opacity": 0.9,
+    "divider_width": 0,
+    "divider_color": [255, 255, 255],
+    "divider_opacity": 0.5,
+    "grid_align_h": "center",
+    "grid_align_v": "center",
+    "today_fill_color": [255, 255, 255],
+    "today_fill_opacity": 0.92,
+    "today_border_color": [255, 255, 255],
+    "today_border_width": 0,
+    "today_border_opacity": 0.9,
 }
 
 
@@ -260,7 +321,12 @@ def _contrast_text(rgb):
 
 
 def _calendar_widget_image(today, font_path, size, grid_size, grid_row_gap,
-                           square_padding, text_color, text_opacity, holiday_color):
+                           square_padding, text_color, text_opacity, holiday_color, *,
+                           divider_width=0, divider_color=(255, 255, 255), divider_opacity=0.5,
+                           grid_align_h="center", grid_align_v="center",
+                           today_fill_color=None, today_fill_opacity=0.92,
+                           today_border_color=None, today_border_width=0,
+                           today_border_opacity=0.9):
     """Today's date/day-name, and a small month grid below it with today
     highlighted. One RGBA image, sized to its own content -- the caller
     places it, so this knows nothing about screen position or the
@@ -273,13 +339,27 @@ def _calendar_widget_image(today, font_path, size, grid_size, grid_row_gap,
     that. text_color is an (r, g, b) tuple and text_opacity 0-1; both apply
     to the date line, the weekday headers and the day numbers alike.
     holiday_color is an (r, g, b) tuple too, already resolved from the
-    calendar.holiday_color palette name by the caller. The "today"
-    highlight is a sharp-edged square, always drawn solid in text_color
-    (at full strength, so it stands out as a highlight rather than fading
-    with the rest), with its own day-number switched to black or white
-    for contrast against it. square_padding shrinks that square by this
-    many pixels on every side, so it reads as a mark inside its cell rather
-    than a tile that fills it edge to edge."""
+    calendar.holiday_color palette name by the caller.
+
+    divider_width > 0 draws a horizontal rule, in divider_color at
+    divider_opacity, across the gap between the "today" line and the month
+    grid below it -- 0 (default) draws nothing there, as before this
+    existed.
+
+    grid_align_h/grid_align_v ("center"/"center" by default, matching the
+    original always-centred placement exactly) say where each day number
+    sits within its own cell: left/center/right across, top/center/bottom
+    down.
+
+    The "today" highlight square's fill and outline are independent of
+    text_color/holiday_color -- today_fill_color defaults to text_color at
+    today_fill_opacity 0.92 (235/255, the exact look this had before these
+    existed), and today_border_width > 0 adds a stroked outline around the
+    square alone in today_border_color/today_border_opacity. Its own
+    day-number is still switched to black or white for contrast against
+    whatever today_fill_color ends up being. square_padding shrinks the
+    square by this many pixels on every side, so it reads as a mark inside
+    its cell rather than a tile that fills it edge to edge."""
     try:
         date_font = ImageFont.truetype(font_path, size)
         grid_font = ImageFont.truetype(font_path, grid_size)
@@ -293,7 +373,11 @@ def _calendar_widget_image(today, font_path, size, grid_size, grid_row_gap,
     header_rgba = (*text_color, round(text_alpha * 0.75))   # weekday row, a touch dimmer
     holiday_rgba = (*holiday_color, text_alpha)
     holiday_header_rgba = (*holiday_color, round(text_alpha * 0.75))
-    today_number_rgba = _contrast_text(text_color)
+    today_fill_color = today_fill_color if today_fill_color is not None else text_color
+    today_fill_rgba = (*today_fill_color, max(0, min(255, round(255 * today_fill_opacity))))
+    today_border_color = today_border_color if today_border_color is not None else (255, 255, 255)
+    today_border_rgba = (*today_border_color, max(0, min(255, round(255 * today_border_opacity))))
+    today_number_rgba = _contrast_text(today_fill_color)
 
     holidays = HOLIDAYS_BY_YEAR.get(today.year, {})
     this_month_holidays = sorted(
@@ -371,6 +455,12 @@ def _calendar_widget_image(today, font_path, size, grid_size, grid_row_gap,
 
     draw.text((date_x, 0), date_line, font=date_font, fill=text_rgba)
 
+    if divider_width > 0:
+        divider_alpha = max(0, min(255, round(255 * divider_opacity)))
+        divider_y = date_h + grid_gap_y / 2
+        draw.line([(0, divider_y), (width, divider_y)],
+                 fill=(*divider_color, divider_alpha), width=divider_width)
+
     grid_top = date_h + grid_gap_y
     for col, label in enumerate(_WEEKDAY_HEADERS):
         cx = col * cell_w + cell_w / 2
@@ -384,6 +474,11 @@ def _calendar_widget_image(today, font_path, size, grid_size, grid_row_gap,
     # smaller of the two and centred within its own column/row.
     # square_padding is per side, so it comes off twice.
     highlight_d = max(1, min(cell_w, cell_h) - 2 * square_padding)
+    # Breathing room between a day number and its cell's own edge, when
+    # grid_align_h/v pins it to a side rather than the centre.
+    cell_pad = max(2, round(min(cell_w, cell_h) * 0.08))
+    grid_align_h = (grid_align_h or "center").lower()
+    grid_align_v = (grid_align_v or "center").lower()
 
     for row, week in enumerate(weeks):
         for col, day in enumerate(week):
@@ -396,9 +491,11 @@ def _calendar_widget_image(today, font_path, size, grid_size, grid_row_gap,
             is_sunday = col == 6
             is_holiday = (today.month, day) in holidays
             if is_today:
-                draw.rectangle([ccx - highlight_d / 2, ccy - highlight_d / 2,
-                               ccx + highlight_d / 2, ccy + highlight_d / 2],
-                              fill=(*text_color, 235))
+                box = [ccx - highlight_d / 2, ccy - highlight_d / 2,
+                      ccx + highlight_d / 2, ccy + highlight_d / 2]
+                draw.rectangle(box, fill=today_fill_rgba)
+                if today_border_width > 0:
+                    draw.rectangle(box, outline=today_border_rgba, width=today_border_width)
             label = str(day)
             lw = probe.textlength(label, font=grid_font)
             if is_today:
@@ -407,8 +504,19 @@ def _calendar_widget_image(today, font_path, size, grid_size, grid_row_gap,
                 day_rgba = holiday_rgba
             else:
                 day_rgba = text_rgba
-            draw.text((ccx - lw / 2, ccy - grid_font.size / 2),
-                      label, font=grid_font, fill=day_rgba)
+            if grid_align_h == "left":
+                tx = cx + cell_pad
+            elif grid_align_h == "right":
+                tx = cx + cell_w - lw - cell_pad
+            else:
+                tx = ccx - lw / 2
+            if grid_align_v == "top":
+                ty = cy + cell_pad
+            elif grid_align_v == "bottom":
+                ty = cy + cell_h - grid_font.size - cell_pad
+            else:
+                ty = ccy - grid_font.size / 2
+            draw.text((tx, ty), label, font=grid_font, fill=day_rgba)
 
     holiday_top = grid_top + grid_h + holiday_gap_y
     for i, line in enumerate(holiday_lines):
@@ -418,7 +526,8 @@ def _calendar_widget_image(today, font_path, size, grid_size, grid_row_gap,
     return img
 
 
-def _wrap_in_panel(content, pad, bg_color, bg_opacity, *, radius_frac=0.6, size_based_radius=False):
+def _wrap_in_panel(content, pad, bg_color, bg_opacity, *, radius_frac=0.6, size_based_radius=False,
+                    border_color=None, border_width=0, border_opacity=1.0):
     """Common look shared by the calendar, clock and status widgets: a
     rounded translucent panel sized to `content` plus `pad` on every side,
     with `content` composited on top. No panel at all (just `content` on
@@ -437,21 +546,36 @@ def _wrap_in_panel(content, pad, bg_color, bg_opacity, *, radius_frac=0.6, size_
     instead, ignoring padding and radius_frac entirely -- padding-based
     rounding breaks down whenever padding itself is set small/tight (e.g.
     panel_padding_y pulled down for a snug vertical fit), which otherwise
-    floors the radius near-flat no matter how big the panel actually is."""
+    floors the radius near-flat no matter how big the panel actually is.
+
+    `border_width` > 0 strokes the same rounded rectangle's outline, in
+    `border_color` at `border_opacity`, on top of the fill (or on its own,
+    over a transparent panel, when bg_opacity is 0 -- an outline-only
+    look). The stroke is drawn inset by half its own width so it doesn't
+    get clipped at the panel's edge."""
     pad_x, pad_y = pad if isinstance(pad, (tuple, list)) else (pad, pad)
     panel_w = content.width + pad_x * 2
     panel_h = content.height + pad_y * 2
     widget = Image.new("RGBA", (panel_w, panel_h), (0, 0, 0, 0))
-    if bg_opacity > 0:
+    if bg_opacity > 0 or border_width > 0:
         panel_draw = ImageDraw.Draw(widget)
-        bg_alpha = round(255 * bg_opacity)
         if size_based_radius:
             radius = max(8, min(60, round(min(panel_w, panel_h) * 0.28)))
         else:
             radius = max(4, min(60, round(min(pad_x, pad_y) * radius_frac)))
-        panel_draw.rounded_rectangle(
-            [0, 0, panel_w - 1, panel_h - 1], radius=radius,
-            fill=(*bg_color, bg_alpha))
+        if bg_opacity > 0:
+            bg_alpha = round(255 * bg_opacity)
+            panel_draw.rounded_rectangle(
+                [0, 0, panel_w - 1, panel_h - 1], radius=radius,
+                fill=(*bg_color, bg_alpha))
+        if border_width > 0:
+            inset = border_width / 2
+            border_alpha = round(255 * border_opacity)
+            panel_draw.rounded_rectangle(
+                [inset, inset, panel_w - 1 - inset, panel_h - 1 - inset],
+                radius=max(0, radius - round(inset)),
+                outline=(*(border_color or (255, 255, 255)), border_alpha),
+                width=border_width)
     widget.alpha_composite(content, (pad_x, pad_y))
     return widget
 
@@ -493,13 +617,34 @@ def write_calendar(canvas):
     bg_color = tuple(int(v) for v in settings["background_color"])
     bg_opacity = max(0.0, min(1.0, float(settings["background_opacity"])))
     holiday_color = HOLIDAY_PALETTE.get(settings["holiday_color"], HOLIDAY_PALETTE["dull_red"])
+    font_path = _resolve_font(settings.get("font_family", ""))
+    border_color = tuple(int(v) for v in settings.get("border_color", [255, 255, 255]))
+    border_width = int(settings.get("border_width", 0))
+    border_opacity = max(0.0, min(1.0, float(settings.get("border_opacity", 0.9))))
+    divider_width = int(settings.get("divider_width", 0))
+    divider_color = tuple(int(v) for v in settings.get("divider_color", [255, 255, 255]))
+    divider_opacity = max(0.0, min(1.0, float(settings.get("divider_opacity", 0.5))))
+    grid_align_h = settings.get("grid_align_h", "center")
+    grid_align_v = settings.get("grid_align_v", "center")
+    today_fill_color = tuple(int(v) for v in settings.get("today_fill_color", [255, 255, 255]))
+    today_fill_opacity = max(0.0, min(1.0, float(settings.get("today_fill_opacity", 0.92))))
+    today_border_color = tuple(int(v) for v in settings.get("today_border_color", [255, 255, 255]))
+    today_border_width = int(settings.get("today_border_width", 0))
+    today_border_opacity = max(0.0, min(1.0, float(settings.get("today_border_opacity", 0.9))))
 
-    content = _calendar_widget_image(datetime.date.today(), FONT_PATH, size, grid_size,
-                                      grid_row_gap, square_padding, text_color, text_opacity,
-                                      holiday_color)
+    content = _calendar_widget_image(
+        datetime.date.today(), font_path, size, grid_size, grid_row_gap, square_padding,
+        text_color, text_opacity, holiday_color,
+        divider_width=divider_width, divider_color=divider_color, divider_opacity=divider_opacity,
+        grid_align_h=grid_align_h, grid_align_v=grid_align_v,
+        today_fill_color=today_fill_color, today_fill_opacity=today_fill_opacity,
+        today_border_color=today_border_color, today_border_width=today_border_width,
+        today_border_opacity=today_border_opacity)
 
     pad = max(6, round(size * _PANEL_PAD_FRAC))
-    widget = _wrap_in_panel(content, pad, bg_color, bg_opacity)
+    widget = _wrap_in_panel(content, pad, bg_color, bg_opacity,
+                            border_color=border_color, border_width=border_width,
+                            border_opacity=border_opacity)
 
     x_pct, y_pct = settings["offset_pct"]
     x = int(SCREEN_W * float(x_pct) / 100)
@@ -520,6 +665,10 @@ DEFAULT_CLOCK_SETTINGS = {
     "background_opacity": 0.35,
     "panel_padding_x": 40,
     "panel_padding_y": 16,
+    "font_family": "",
+    "border_color": [255, 255, 255],
+    "border_width": 0,
+    "border_opacity": 0.9,
 }
 
 
@@ -553,9 +702,13 @@ def write_clock(canvas):
     text_opacity = max(0.0, min(1.0, float(settings["text_opacity"])))
     bg_color = tuple(int(v) for v in settings["background_color"])
     bg_opacity = max(0.0, min(1.0, float(settings["background_opacity"])))
+    font_path = _resolve_font(settings.get("font_family", ""))
+    border_color = tuple(int(v) for v in settings.get("border_color", [255, 255, 255]))
+    border_width = int(settings.get("border_width", 0))
+    border_opacity = max(0.0, min(1.0, float(settings.get("border_opacity", 0.9))))
 
     try:
-        clock_font = ImageFont.truetype(FONT_PATH, size)
+        clock_font = ImageFont.truetype(font_path, size)
     except OSError:
         clock_font = ImageFont.truetype(
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size)
@@ -576,7 +729,9 @@ def write_clock(canvas):
 
     pad_x = max(0, int(settings.get("panel_padding_x", 40)))
     pad_y = max(0, int(settings.get("panel_padding_y", 16)))
-    widget = _wrap_in_panel(content, (pad_x, pad_y), bg_color, bg_opacity, size_based_radius=True)
+    widget = _wrap_in_panel(content, (pad_x, pad_y), bg_color, bg_opacity, size_based_radius=True,
+                            border_color=border_color, border_width=border_width,
+                            border_opacity=border_opacity)
 
     x, y = _anchor_xy(settings["position"], settings["offset_pct"],
                       (widget.width, widget.height))
@@ -593,6 +748,10 @@ DEFAULT_STATUS_SETTINGS = {
     "text_opacity": 0.9,
     "background_color": [0, 0, 0],
     "background_opacity": 0.35,
+    "font_family": "",
+    "border_color": [255, 255, 255],
+    "border_width": 0,
+    "border_opacity": 0.9,
 }
 
 
@@ -699,9 +858,13 @@ def write_status(canvas):
     text_opacity = max(0.0, min(1.0, float(settings["text_opacity"])))
     bg_color = tuple(int(v) for v in settings["background_color"])
     bg_opacity = max(0.0, min(1.0, float(settings["background_opacity"])))
+    font_path = _resolve_font(settings.get("font_family", ""))
+    border_color = tuple(int(v) for v in settings.get("border_color", [255, 255, 255]))
+    border_width = int(settings.get("border_width", 0))
+    border_opacity = max(0.0, min(1.0, float(settings.get("border_opacity", 0.9))))
 
     try:
-        status_font = ImageFont.truetype(FONT_PATH, size)
+        status_font = ImageFont.truetype(font_path, size)
     except OSError:
         status_font = ImageFont.truetype(
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size)
@@ -758,7 +921,9 @@ def write_status(canvas):
         cdraw.text((text_x, y), text, font=status_font, fill=(*text_color, text_alpha))
 
     pad = max(6, round(size * _PANEL_PAD_FRAC))
-    widget = _wrap_in_panel(content, pad, bg_color, bg_opacity)
+    widget = _wrap_in_panel(content, pad, bg_color, bg_opacity,
+                            border_color=border_color, border_width=border_width,
+                            border_opacity=border_opacity)
 
     x, y = _anchor_xy(settings["position"], settings["offset_pct"],
                       (widget.width, widget.height))
@@ -837,8 +1002,10 @@ def write_overlay(line_text, filled_dots):
     but only when the rendered canvas actually differs from the last one
     written (see _last_canvas_bytes above)."""
     global _last_canvas_bytes
+    overlay_settings = load_overlay_settings()
+    caption_font_path = _resolve_font(overlay_settings.get("font_family", ""))
     try:
-        caption_font = ImageFont.truetype(FONT_PATH, max(11, int(CLOCK_SIZE * EXTRA_SCALE)))
+        caption_font = ImageFont.truetype(caption_font_path, max(11, int(CLOCK_SIZE * EXTRA_SCALE)))
     except OSError:
         caption_font = ImageFont.truetype(
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -852,7 +1019,6 @@ def write_overlay(line_text, filled_dots):
     write_status(canvas)
 
     if line_text:
-        overlay_settings = load_overlay_settings()
         bg_opacity = max(0.0, min(1.0, float(overlay_settings.get("background_opacity", 0.0))))
 
         if bg_opacity <= 0:
@@ -951,7 +1117,12 @@ def write_overlay(line_text, filled_dots):
 
             pad = max(0, int(overlay_settings.get("background_padding", 20)))
             bg_color = tuple(int(v) for v in overlay_settings.get("background_color", [0, 0, 0]))
-            widget = _wrap_in_panel(content, pad, bg_color, bg_opacity)
+            border_color = tuple(int(v) for v in overlay_settings.get("border_color", [255, 255, 255]))
+            border_width = int(overlay_settings.get("border_width", 0))
+            border_opacity = max(0.0, min(1.0, float(overlay_settings.get("border_opacity", 0.9))))
+            widget = _wrap_in_panel(content, pad, bg_color, bg_opacity,
+                                    border_color=border_color, border_width=border_width,
+                                    border_opacity=border_opacity)
 
             x, y = _anchor_xy("BR", list(CLOCK_OFFSET_PCT), (widget.width, widget.height))
             canvas.alpha_composite(widget, (x, y))

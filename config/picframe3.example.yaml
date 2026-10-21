@@ -155,9 +155,14 @@ viewer:
   # styles.
   mat_bevel_width: 5
   font: null              # Path to a .ttf. Empty finds DejaVu, Noto or Liberation.
+  # A font from the library for the caption alone, instead of the frame-wide
+  # font above. Empty inherits it.
+  text_font_family: ''
   # What is written over the picture, in the order it is written.
   show_text: [title, caption, date, location]
   text_size: 34           # Caption type size, in pixels at 1080p.
+  # Red, green, blue, 0–255. The caption text itself.
+  text_color: [255, 255, 255]
   # How long the caption stays up after each change. 0 writes nothing by
   # itself — the caption then appears only when you ask for it.
   text_seconds: 16.0
@@ -188,6 +193,13 @@ viewer:
   text_panel_opacity: 0.0
   # Red, green, blue, 0–255.
   text_panel_color: [0, 0, 0]
+  # Red, green, blue, 0–255. A stroked outline around the caption panel.
+  # Only matters when text_panel_opacity > 0.
+  text_panel_border_color: [255, 255, 255]
+  # Outline thickness in pixels. 0 (default) draws no outline.
+  text_panel_border_width: 0
+  # 0–1. Only matters when text_panel_border_width > 0.
+  text_panel_border_opacity: 0.9
   # Gap, in pixels, between the caption text and the panel's left/right
   # edge. Only matters when text_panel_opacity > 0.
   text_panel_padding_x: 28
@@ -547,6 +559,13 @@ overlay:
   # Gap, in pixels, between the caption text/dot grid and the panel's own
   # edge. Only matters when background_opacity > 0. (advanced)
   background_padding: 20
+  # A font from the library for this widget alone, instead of the frame-wide
+  # font. Empty inherits it.
+  font_family: ''
+  # Red, green, blue, 0–255. A stroked outline around the panel.
+  border_color: [255, 255, 255]
+  border_width: 0         # Outline thickness in pixels. 0 (default) draws no outline.
+  border_opacity: 0.9     # 0–1. Only matters when border_width > 0.
 
 # The upper-left calendar widget: today's date and a small month grid.
 calendar:
@@ -579,6 +598,33 @@ calendar:
   # Colour of Sundays, holiday dates and the holiday list below the grid —
   # picked from a fixed palette rather than mixed by hand.
   holiday_color: dull_red
+  # A font from the library for this widget alone, instead of the frame-wide
+  # font. Empty inherits it.
+  font_family: ''
+  # Red, green, blue, 0–255. A stroked outline around the whole widget's
+  # panel.
+  border_color: [255, 255, 255]
+  border_width: 0         # Outline thickness in pixels. 0 (default) draws no outline.
+  border_opacity: 0.9     # 0–1. Only matters when border_width > 0.
+  # Thickness, in pixels, of a line separating the “today” line from the
+  # month grid below it. 0 (default) draws none.
+  divider_width: 0
+  # Red, green, blue, 0–255.
+  divider_color: [255, 255, 255]
+  divider_opacity: 0.5    # 0–1. Only matters when divider_width > 0.
+  grid_align_h: center    # Where a day number sits across its own cell: left, centre or right.
+  grid_align_v: center    # Where a day number sits within its own cell: top, centre or bottom.
+  # Red, green, blue, 0–255. The “today” highlight square's own fill,
+  # independent of the text colour above.
+  today_fill_color: [255, 255, 255]
+  # 0–1.
+  today_fill_opacity: 0.92
+  # Red, green, blue, 0–255. A stroked outline around the “today” square
+  # alone, separate from the whole widget's own border above.
+  today_border_color: [255, 255, 255]
+  today_border_width: 0   # Outline thickness in pixels. 0 (default) draws no outline.
+  # 0–1. Only matters when today_border_width > 0.
+  today_border_opacity: 0.9
 
 # A custom-drawn clock with its own translucent panel.
 clock:
@@ -603,6 +649,13 @@ clock:
   # Set separately from the horizontal gap, since the clock's text is wide
   # but only one line tall. Only matters when background_opacity > 0.
   panel_padding_y: 16
+  # A font from the library for this widget alone, instead of the frame-wide
+  # font. Empty inherits it.
+  font_family: ''
+  # Red, green, blue, 0–255. A stroked outline around the panel.
+  border_color: [255, 255, 255]
+  border_width: 0         # Outline thickness in pixels. 0 (default) draws no outline.
+  border_opacity: 0.9     # 0–1. Only matters when border_width > 0.
 
 # A small status strip -- outdoor sensor link, and more to come.
 status:
@@ -617,6 +670,13 @@ status:
   background_color: [0, 0, 0]
   # 0 (no panel at all) – 1 (solid panel).
   background_opacity: 0.35
+  # A font from the library for this widget alone, instead of the frame-wide
+  # font. Empty inherits it.
+  font_family: ''
+  # Red, green, blue, 0–255. A stroked outline around the panel.
+  border_color: [255, 255, 255]
+  border_width: 0         # Outline thickness in pixels. 0 (default) draws no outline.
+  border_opacity: 0.9     # 0–1. Only matters when border_width > 0.
 
 # The small animated maker's mark in a corner of the screen.
 brand:

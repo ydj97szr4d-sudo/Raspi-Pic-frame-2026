@@ -137,10 +137,16 @@ class ViewerConfig:
     mat_bevel_width: int = 5
 
     font: str | None = None
+    #: A library font name (media.fontlib.CHOICES) for the caption alone,
+    #: instead of font above. "" (default) inherits font.
+    text_font_family: str = ""
     show_text: list[str] = field(
         default_factory=lambda: ["title", "caption", "date", "location"]
     )
     text_size: int = 34
+    #: Red, green, blue, 0-255. Caption text was always drawn at a hardcoded
+    #: white before this existed; white stays the default.
+    text_color: list[int] = field(default_factory=lambda: [255, 255, 255])
     text_seconds: float = 16.0
     #: How long the caption stays up when it is *asked* for -- the Home
     #: Assistant button, the ``i`` key -- rather than the few seconds it gets
@@ -172,6 +178,14 @@ class ViewerConfig:
     #: alone (or nothing) behind the text. The two can be used together.
     text_panel_opacity: float = 0.0
     text_panel_color: list[int] = field(default_factory=lambda: [0, 0, 0])
+    #: Red, green, blue, 0-255. A stroked outline around the caption panel
+    #: above. Only matters when text_panel_opacity > 0.
+    text_panel_border_color: list[int] = field(default_factory=lambda: [255, 255, 255])
+    #: Outline thickness in pixels. 0 (default) draws no outline.
+    text_panel_border_width: int = 0
+    #: 0 (invisible) - 1 (fully opaque). Only matters when
+    #: text_panel_border_width > 0.
+    text_panel_border_opacity: float = 0.9
     #: Gap, in pixels, between the caption text and the panel's left/right
     #: edge. Set separately from the vertical gap because a caption is
     #: usually wide and short, so the same pixel margin on every side reads
@@ -530,6 +544,16 @@ class OverlayConfig:
     #: Gap, in pixels, between the caption text/dot grid and the panel's
     #: own edge. Only matters when background_opacity > 0.
     background_padding: int = 20
+    #: A library font name (media.fontlib.CHOICES) for this widget alone,
+    #: instead of the frame-wide viewer.font. "" (default) inherits it.
+    font_family: str = ""
+    #: Red, green, blue, 0-255. A stroked outline around the panel, the
+    #: same rounded rectangle its fill uses.
+    border_color: list[int] = field(default_factory=lambda: [255, 255, 255])
+    #: Outline thickness in pixels. 0 (default) draws no outline.
+    border_width: int = 0
+    #: 0 (invisible) - 1 (fully opaque). Only matters when border_width > 0.
+    border_opacity: float = 0.9
 
 
 @dataclass
@@ -583,6 +607,40 @@ class CalendarConfig:
     #: A plain dropdown rather than a 3-number RGB field, so it reads as a
     #: palette swatch pick rather than a colour-mixing exercise.
     holiday_color: str = "dull_red"
+    #: A library font name (media.fontlib.CHOICES) for this widget alone,
+    #: instead of the frame-wide viewer.font. "" (default) inherits it.
+    font_family: str = ""
+    #: Red, green, blue, 0-255. A stroked outline around the whole widget's
+    #: panel, the same rounded rectangle its fill uses.
+    border_color: list[int] = field(default_factory=lambda: [255, 255, 255])
+    #: Outline thickness in pixels. 0 (default) draws no outline.
+    border_width: int = 0
+    #: 0 (invisible) - 1 (fully opaque). Only matters when border_width > 0.
+    border_opacity: float = 0.9
+    #: Thickness, in pixels, of a line separating the "today" line from the
+    #: month grid below it. 0 (default) draws none.
+    divider_width: int = 0
+    #: Red, green, blue, 0-255.
+    divider_color: list[int] = field(default_factory=lambda: [255, 255, 255])
+    #: 0 (invisible) - 1 (fully opaque). Only matters when divider_width > 0.
+    divider_opacity: float = 0.5
+    #: Where a day number sits across its cell, left to right.
+    grid_align_h: str = "center"              # left | center | right
+    #: Where a day number sits within its cell, top to bottom.
+    grid_align_v: str = "center"              # top | center | bottom
+    #: Red, green, blue, 0-255. The "today" highlight square's own fill --
+    #: independent of text_color, which used to double as this.
+    today_fill_color: list[int] = field(default_factory=lambda: [255, 255, 255])
+    #: 0 (invisible) - 1 (fully opaque).
+    today_fill_opacity: float = 0.92
+    #: Red, green, blue, 0-255. A stroked outline around the "today" square
+    #: alone, separate from the whole widget's own border above.
+    today_border_color: list[int] = field(default_factory=lambda: [255, 255, 255])
+    #: Outline thickness in pixels. 0 (default) draws no outline.
+    today_border_width: int = 0
+    #: 0 (invisible) - 1 (fully opaque). Only matters when
+    #: today_border_width > 0.
+    today_border_opacity: float = 0.9
 
 
 @dataclass
@@ -622,6 +680,16 @@ class ClockConfig:
     #: reads as barely-there sideways and oversized top and bottom.
     panel_padding_x: int = 40
     panel_padding_y: int = 16
+    #: A library font name (media.fontlib.CHOICES) for this widget alone,
+    #: instead of the frame-wide viewer.font. "" (default) inherits it.
+    font_family: str = ""
+    #: Red, green, blue, 0-255. A stroked outline around the panel, the
+    #: same rounded rectangle its fill uses.
+    border_color: list[int] = field(default_factory=lambda: [255, 255, 255])
+    #: Outline thickness in pixels. 0 (default) draws no outline.
+    border_width: int = 0
+    #: 0 (invisible) - 1 (fully opaque). Only matters when border_width > 0.
+    border_opacity: float = 0.9
 
 
 @dataclass
@@ -649,6 +717,16 @@ class StatusConfig:
     background_color: list[int] = field(default_factory=lambda: [0, 0, 0])
     #: 0 (no panel at all) - 1 (solid panel).
     background_opacity: float = 0.35
+    #: A library font name (media.fontlib.CHOICES) for this widget alone,
+    #: instead of the frame-wide viewer.font. "" (default) inherits it.
+    font_family: str = ""
+    #: Red, green, blue, 0-255. A stroked outline around the panel, the
+    #: same rounded rectangle its fill uses.
+    border_color: list[int] = field(default_factory=lambda: [255, 255, 255])
+    #: Outline thickness in pixels. 0 (default) draws no outline.
+    border_width: int = 0
+    #: 0 (invisible) - 1 (fully opaque). Only matters when border_width > 0.
+    border_opacity: float = 0.9
 
 
 @dataclass

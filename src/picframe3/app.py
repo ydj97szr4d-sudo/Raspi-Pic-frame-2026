@@ -30,6 +30,7 @@ from .library.removed import JOURNAL_NAME, RemovalLog
 from .library.scanner import Scanner
 from .media import PrepareOptions, SlideLoader
 from .media import edit as edit_module
+from .media import fontlib
 from .media import geocode as geocode_module
 from .media.geocode import Geocoder
 from .media.mat import MatStyle
@@ -762,9 +763,10 @@ class PicFrame:
     # ------------------------------------------------------------------
     def _text_style(self, size: int, justify: str = "L", opacity: float = 1.0) -> TextStyle:
         v = self.config.viewer
+        font_path = fontlib.resolve(v.text_font_family) or v.font
         return TextStyle(
-            font_path=v.font, size=size, justify=justify, opacity=opacity,
-            margin_x=v.text_margin_x, margin_y=v.text_margin_y,
+            font_path=font_path, size=size, justify=justify, opacity=opacity,
+            color=tuple(v.text_color), margin_x=v.text_margin_x, margin_y=v.text_margin_y,
         )
 
     def _build_info_overlay(self, group: list[Record]) -> None:
@@ -799,6 +801,9 @@ class PicFrame:
             position=self.config.viewer.text_position,
             offset_pct=tuple(self.config.viewer.text_offset_pct),
             pair_bottom_margin=self.config.viewer.pair_text_bottom_margin,
+            panel_border_color=tuple(self.config.viewer.text_panel_border_color),
+            panel_border_width=self.config.viewer.text_panel_border_width,
+            panel_border_opacity=self.config.viewer.text_panel_border_opacity,
         )
         if placement is None:
             self.renderer.set_overlay("info", None)

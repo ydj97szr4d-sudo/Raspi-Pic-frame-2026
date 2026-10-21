@@ -81,8 +81,10 @@ How a picture is composed on screen, and what is written over it.
 | `mat_auto_inner_color` | boolean | `True` | Off makes the inner mat a darker shade of the outer instead of its own colour from the photograph. |
 | `mat_bevel_width` | integer | `5` | The chamfered cut of the opening, in pixels at 1080p, for the `*_bevel` styles. |
 | `font` | str | None | `None` | Path to a .ttf. Empty finds DejaVu, Noto or Liberation. |
+| `text_font_family` | string | *(empty)* | A font from the library for the caption alone, instead of the frame-wide font above. Empty inherits it. |
 | `show_text` | list of strings | `['title', 'caption', 'date', 'location']` | What is written over the picture, in the order it is written. |
 | `text_size` | integer | `34` | Caption type size, in pixels at 1080p. |
+| `text_color` | list of integers | `[255, 255, 255]` | Red, green, blue, 0–255. The caption text itself. |
 | `text_seconds` | number | `16.0` | How long the caption stays up after each change. 0 writes nothing by itself — the caption then appears only when you ask for it. |
 | `peek_seconds` | number | `40.0` | How long the caption stays up when you *ask* for it — the Home Assistant button, the `i` key — rather than the seconds it gets by itself. A deliberate look wants longer than a glance. |
 | `text_justify` | string | `'L'` | Left, centred or right. A pair of portraits always centres each caption under its own picture. |
@@ -93,6 +95,9 @@ How a picture is composed on screen, and what is written over it.
 | `text_scrim` | number | `0.5` | Darkening behind the caption so it stays legible over a bright picture. 0–1. |
 | `text_panel_opacity` | number | `0.0` | A rounded panel behind the caption text, sized to the text itself rather than the full width (unlike the darkening above) — the same look the calendar/clock/status overlay widgets have. 0 (default) draws no panel; the two can be used together. |
 | `text_panel_color` | list of integers | `[0, 0, 0]` | Red, green, blue, 0–255. |
+| `text_panel_border_color` | list of integers | `[255, 255, 255]` | Red, green, blue, 0–255. A stroked outline around the caption panel. Only matters when text_panel_opacity > 0. |
+| `text_panel_border_width` | integer | `0` | Outline thickness in pixels. 0 (default) draws no outline. |
+| `text_panel_border_opacity` | number | `0.9` | 0–1. Only matters when text_panel_border_width > 0. |
 | `text_panel_padding_x` | integer | `28` | Gap, in pixels, between the caption text and the panel's left/right edge. Only matters when text_panel_opacity > 0. |
 | `text_panel_padding_y` | integer | `16` | Gap, in pixels, between the caption text and the panel's top/bottom edge. Set separately from the horizontal gap since a caption is usually wide and short. Only matters when text_panel_opacity > 0. |
 | `text_panel_min_width_pct` | number | `0.0` | Stretches the panel to at least this percent of the screen's width when the text is narrower — the text stays aligned inside per text_justify, only the panel widens. 0 leaves it hugging the text. Only matters when text_panel_opacity > 0. |
@@ -303,6 +308,10 @@ The weather caption and its idle-countdown dot grid.
 | `background_color` | list of integers | `[0, 0, 0]` | Red, green, blue, 0–255. The panel drawn behind the weather caption and its dot grid together — the same look the calendar/clock/status widgets have. |
 | `background_opacity` | number | `0.35` | 0 (no panel at all — the original drop-shadowed text, no box) – 1 (solid panel). |
 | `background_padding` | integer | `20` | Gap, in pixels, between the caption text/dot grid and the panel's own edge. Only matters when background_opacity > 0. *(advanced)* |
+| `font_family` | string | *(empty)* | A font from the library for this widget alone, instead of the frame-wide font. Empty inherits it. |
+| `border_color` | list of integers | `[255, 255, 255]` | Red, green, blue, 0–255. A stroked outline around the panel. |
+| `border_width` | integer | `0` | Outline thickness in pixels. 0 (default) draws no outline. |
+| `border_opacity` | number | `0.9` | 0–1. Only matters when border_width > 0. |
 
 ## `calendar`
 
@@ -321,6 +330,20 @@ The upper-left calendar widget: today's date and a small month grid.
 | `background_color` | list of integers | `[0, 0, 0]` | Red, green, blue, 0–255. The panel drawn behind the whole widget, so the text stays legible over a busy photograph. |
 | `background_opacity` | number | `0.35` | 0 (no panel at all — text floats directly over the picture) – 1 (solid panel). |
 | `holiday_color` | string | `'dull_red'` | Colour of Sundays, holiday dates and the holiday list below the grid — picked from a fixed palette rather than mixed by hand. |
+| `font_family` | string | *(empty)* | A font from the library for this widget alone, instead of the frame-wide font. Empty inherits it. |
+| `border_color` | list of integers | `[255, 255, 255]` | Red, green, blue, 0–255. A stroked outline around the whole widget's panel. |
+| `border_width` | integer | `0` | Outline thickness in pixels. 0 (default) draws no outline. |
+| `border_opacity` | number | `0.9` | 0–1. Only matters when border_width > 0. |
+| `divider_width` | integer | `0` | Thickness, in pixels, of a line separating the “today” line from the month grid below it. 0 (default) draws none. |
+| `divider_color` | list of integers | `[255, 255, 255]` | Red, green, blue, 0–255. |
+| `divider_opacity` | number | `0.5` | 0–1. Only matters when divider_width > 0. |
+| `grid_align_h` | string | `'center'` | Where a day number sits across its own cell: left, centre or right. |
+| `grid_align_v` | string | `'center'` | Where a day number sits within its own cell: top, centre or bottom. |
+| `today_fill_color` | list of integers | `[255, 255, 255]` | Red, green, blue, 0–255. The “today” highlight square's own fill, independent of the text colour above. |
+| `today_fill_opacity` | number | `0.92` | 0–1. |
+| `today_border_color` | list of integers | `[255, 255, 255]` | Red, green, blue, 0–255. A stroked outline around the “today” square alone, separate from the whole widget's own border above. |
+| `today_border_width` | integer | `0` | Outline thickness in pixels. 0 (default) draws no outline. |
+| `today_border_opacity` | number | `0.9` | 0–1. Only matters when today_border_width > 0. |
 
 ## `clock`
 
@@ -339,6 +362,10 @@ A custom-drawn clock with its own translucent panel.
 | `background_opacity` | number | `0.35` | 0 (no panel at all) – 1 (solid panel). |
 | `panel_padding_x` | integer | `40` | Gap, in pixels, between the time text and the panel's left/right edge. Only matters when background_opacity > 0. |
 | `panel_padding_y` | integer | `16` | Gap, in pixels, between the time text and the panel's top/bottom edge. Set separately from the horizontal gap, since the clock's text is wide but only one line tall. Only matters when background_opacity > 0. |
+| `font_family` | string | *(empty)* | A font from the library for this widget alone, instead of the frame-wide font. Empty inherits it. |
+| `border_color` | list of integers | `[255, 255, 255]` | Red, green, blue, 0–255. A stroked outline around the panel. |
+| `border_width` | integer | `0` | Outline thickness in pixels. 0 (default) draws no outline. |
+| `border_opacity` | number | `0.9` | 0–1. Only matters when border_width > 0. |
 
 ## `status`
 
@@ -354,6 +381,10 @@ A small status strip -- outdoor sensor link, and more to come.
 | `text_opacity` | number | `0.9` | 0–1. |
 | `background_color` | list of integers | `[0, 0, 0]` | Red, green, blue, 0–255. The panel drawn behind the strip. |
 | `background_opacity` | number | `0.35` | 0 (no panel at all) – 1 (solid panel). |
+| `font_family` | string | *(empty)* | A font from the library for this widget alone, instead of the frame-wide font. Empty inherits it. |
+| `border_color` | list of integers | `[255, 255, 255]` | Red, green, blue, 0–255. A stroked outline around the panel. |
+| `border_width` | integer | `0` | Outline thickness in pixels. 0 (default) draws no outline. |
+| `border_opacity` | number | `0.9` | 0–1. Only matters when border_width > 0. |
 
 ## `brand`
 

@@ -142,6 +142,10 @@ REQUIRED_PACKAGES=(
 )
 OPTIONAL_PACKAGES=(
   fonts-dejavu-core libraqm0                # captions, incl. shaped scripts
+  fonts-liberation2 fonts-noto-core         # the rest of the font library
+                                             # (media/fontlib.py) every
+                                             # overlay widget's font setting
+                                             # picks from
   python3-gi gir1.2-glib-2.0                # GStreamer bindings…
   gir1.2-gst-plugins-base-1.0
   gstreamer1.0-plugins-base gstreamer1.0-plugins-good

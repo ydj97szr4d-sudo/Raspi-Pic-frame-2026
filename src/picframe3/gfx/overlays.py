@@ -84,6 +84,9 @@ def info_bar(
     position: str = "",
     offset_pct: tuple[float, float] = (3.0, 3.0),
     pair_bottom_margin: int = 0,
+    panel_border_color: tuple[int, int, int] = (255, 255, 255),
+    panel_border_width: int = 0,
+    panel_border_opacity: float = 0.9,
 ) -> Placement | None:
     """Caption block, normally anchored to the bottom of the screen over a
     gradient -- unless ``position`` says otherwise (see below).
@@ -114,6 +117,11 @@ def info_bar(
     bottom band regardless, since "a corner" does not make sense split across
     two side-by-side pictures.
 
+    ``panel_border_width`` > 0 (0 by default -- no change from before this
+    existed) strokes an outline around each column's panel in
+    ``panel_border_color`` at ``panel_border_opacity``. Only draws anything
+    when ``panel_opacity`` > 0, since there is no panel to outline otherwise.
+
     ``pair_bottom_margin`` (0 by default -- flush with the bottom edge, as
     before this existed) lifts that full-width band clear of the very bottom
     of the screen, for a pair only. It exists because the band's position
@@ -140,7 +148,9 @@ def info_bar(
         min_width = round(w * panel_min_width_pct / 100) if panel_min_width_pct > 0 else 0
         bodies = [
             _panel_wrap(b, (panel_padding_x, panel_padding_y), panel_color, panel_opacity,
-                       min_width=min_width, justify=style.justify)
+                       min_width=min_width, justify=style.justify,
+                       border_color=panel_border_color, border_width=panel_border_width,
+                       border_opacity=panel_border_opacity)
             if b is not None else None
             for b in bodies
         ]
@@ -182,7 +192,9 @@ def info_bar(
 
 
 def _panel_wrap(content: Image.Image, pad: int | tuple[int, int], color: tuple[int, int, int],
-                opacity: float, *, min_width: int = 0, justify: str = "L") -> Image.Image:
+                opacity: float, *, min_width: int = 0, justify: str = "L",
+                border_color: tuple[int, int, int] | None = None, border_width: int = 0,
+                border_opacity: float = 1.0) -> Image.Image:
     """Rounded translucent panel sized to `content` plus `pad` on every
     side, with `content` composited on top -- the overlays.py counterpart of
     dht_mqtt.py's _wrap_in_panel, kept as its own small copy here rather than
@@ -200,6 +212,11 @@ def _panel_wrap(content: Image.Image, pad: int | tuple[int, int], color: tuple[i
     aligned inside per `justify` (L/C/R) rather than centred unconditionally
     -- a left-justified caption gets a wide panel with its text still
     hugging the left edge, not floating in the middle of it.
+
+    `border_width` > 0 strokes the same rounded rectangle's outline, in
+    `border_color` at `border_opacity`, inset by half its own width so the
+    stroke isn't clipped at the panel's edge -- the same look
+    dht_mqtt.py's _wrap_in_panel offers its own widgets.
     """
     pad_x, pad_y = pad if isinstance(pad, (tuple, list)) else (pad, pad)
     pad_x, pad_y = max(0, int(pad_x)), max(0, int(pad_y))
@@ -213,8 +230,17 @@ def _panel_wrap(content: Image.Image, pad: int | tuple[int, int], color: tuple[i
     # even on a big panel. Capped so a very wide/tall panel doesn't turn
     # into a stadium shape.
     radius = max(8, min(60, round(min(panel_w, panel_h) * 0.28)))
-    ImageDraw.Draw(panel).rounded_rectangle(
+    panel_draw = ImageDraw.Draw(panel)
+    panel_draw.rounded_rectangle(
         [0, 0, panel_w - 1, panel_h - 1], radius=radius, fill=(*color, alpha))
+    if border_width > 0:
+        inset = border_width / 2
+        border_alpha = round(255 * max(0.0, min(1.0, border_opacity)))
+        panel_draw.rounded_rectangle(
+            [inset, inset, panel_w - 1 - inset, panel_h - 1 - inset],
+            radius=max(0, radius - round(inset)),
+            outline=(*(border_color or (255, 255, 255)), border_alpha),
+            width=border_width)
     justify = justify.upper()
     if justify == "C":
         cx = pad_x + (inner_w - content.width) // 2
