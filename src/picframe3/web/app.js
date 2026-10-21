@@ -1447,32 +1447,78 @@ function drawSheetExtra(job) {
    After that it is a one-shot action, not a mode -- each widget's fields
    are exactly as if they had been typed in one at a time, and editing any
    of them afterward sticks, same as any other setting. */
+// Every concept below exists, under its own name, on at least two of these
+// five widgets -- see each widget's own settings card for the ones that
+// don't generalise (grid_align_h/v, size, offset_pct/position, enabled):
+// those are left out here on purpose because forcing them equal across
+// widgets that are meant to sit in different places at different scales
+// would do more harm than good.
 const UNIFORM_TARGETS = {
-  calendar: { label: "Calendar", text_color: "calendar.text_color", font: "calendar.font_family",
+  calendar: { label: "Calendar",
+             text_color: "calendar.text_color", text_opacity: "calendar.text_opacity",
+             font: "calendar.font_family",
+             background_color: "calendar.background_color",
+             background_opacity: "calendar.background_opacity",
              border_color: "calendar.border_color", border_width: "calendar.border_width",
              border_opacity: "calendar.border_opacity" },
-  clock: { label: "Clock", text_color: "clock.text_color", font: "clock.font_family",
+  clock: { label: "Clock",
+          text_color: "clock.text_color", text_opacity: "clock.text_opacity",
+          font: "clock.font_family",
+          background_color: "clock.background_color",
+          background_opacity: "clock.background_opacity",
           border_color: "clock.border_color", border_width: "clock.border_width",
-          border_opacity: "clock.border_opacity" },
-  status: { label: "Status strip", text_color: "status.text_color", font: "status.font_family",
+          border_opacity: "clock.border_opacity",
+          align: "clock.align", min_width_pct: "clock.min_width_pct" },
+  status: { label: "Status strip",
+           text_color: "status.text_color", text_opacity: "status.text_opacity",
+           font: "status.font_family",
+           background_color: "status.background_color",
+           background_opacity: "status.background_opacity",
            border_color: "status.border_color", border_width: "status.border_width",
-           border_opacity: "status.border_opacity" },
-  overlay: { label: "Weather overlay", font: "overlay.font_family",
+           border_opacity: "status.border_opacity",
+           align: "status.align", min_width_pct: "status.min_width_pct" },
+  overlay: { label: "Weather overlay",
+            font: "overlay.font_family",
+            background_color: "overlay.background_color",
+            background_opacity: "overlay.background_opacity",
             border_color: "overlay.border_color", border_width: "overlay.border_width",
-            border_opacity: "overlay.border_opacity" },
-  viewer: { label: "Picture caption", text_color: "viewer.text_color",
-           font: "viewer.text_font_family", border_color: "viewer.text_panel_border_color",
+            border_opacity: "overlay.border_opacity",
+            align: "overlay.align", min_width_pct: "overlay.min_width_pct" },
+  viewer: { label: "Picture caption",
+           text_color: "viewer.text_color", text_opacity: "viewer.text_opacity",
+           font: "viewer.text_font_family",
+           background_color: "viewer.text_panel_color",
+           background_opacity: "viewer.text_panel_opacity",
+           border_color: "viewer.text_panel_border_color",
            border_width: "viewer.text_panel_border_width",
-           border_opacity: "viewer.text_panel_border_opacity" },
+           border_opacity: "viewer.text_panel_border_opacity",
+           align: "viewer.text_justify", min_width_pct: "viewer.text_panel_min_width_pct" },
 };
+
+// Every field in the panel starts blank/unset, meaning "leave this alone".
+// Only a field the person actually fills in gets sent, and only to the
+// widgets that have it -- so pressing Apply right after opening the panel
+// changes nothing (there is nothing yet to apply), rather than silently
+// resetting every widget's border back to a hidden default.
+// A plain-text sentinel, not a real font name or L/C/R value, so it can
+// never collide with one. (A control character was tried here first and
+// didn't survive round-tripping through an HTML attribute -- the browser
+// normalises it away, so the "leave unchanged" option silently matched
+// nothing and fell through to being sent as a literal value instead.)
+const UNIFORM_SKIP = "__picframe3_leave_unchanged__";
 
 function drawUniformStyle() {
   const box = $("#sheet-extra");
   const byKey = fieldsByKey();
   const fontChoices = (byKey["calendar.font_family"]?.choices || [""]);
-  const fontOpts = fontChoices.map((name) =>
-    `<option value="${escapeHtml(name)}">${escapeHtml(name || "(frame's own font)")}</option>`
-  ).join("");
+  const fontOpts = [`<option value="${UNIFORM_SKIP}">(leave unchanged)</option>`]
+    .concat(fontChoices.map((name) =>
+      `<option value="${escapeHtml(name)}">${escapeHtml(name || "(frame's own font)")}</option>`
+    )).join("");
+  const alignOpts = [`<option value="${UNIFORM_SKIP}">(leave unchanged)</option>`]
+    .concat(["L", "C", "R"].map((v) =>
+      `<option value="${v}">${{ L: "Left", C: "Centre", R: "Right" }[v]}</option>`
+    )).join("");
   const rows = Object.entries(UNIFORM_TARGETS).map(([id, t]) => `
     <label class="uniform-target">
       <input type="checkbox" data-uniform-target="${id}" checked>
@@ -1480,32 +1526,57 @@ function drawUniformStyle() {
     </label>`).join("");
   box.innerHTML = `<div class="panel">
     <p class="muted">Pick a look once, then apply it to every widget's own
-      settings below. Each one keeps its own fields afterward -- tweak any
-      of them individually later and it stays that way.</p>
+      settings below. Only the fields you actually fill in here are changed
+      -- leave one blank (or "leave unchanged") and that aspect of every
+      widget stays exactly as it was. Each one keeps its own fields
+      afterward -- tweak any of them individually later and it stays that
+      way.</p>
     <div class="field">
       <label>Text colour</label>
       <input type="text" id="uniform-text-color" placeholder="e.g. 255, 255, 255"
              data-kind="numbers">
-      <div class="hint">Red, green, blue, 0–255. Left blank to leave text
-        colour alone. Has no effect on Weather overlay, whose caption text
-        has no colour setting of its own.</div>
+      <div class="hint">Red, green, blue, 0–255. Has no effect on Weather
+        overlay, whose caption text has no colour setting of its own.</div>
+    </div>
+    <div class="field">
+      <label>Text opacity</label>
+      <input type="number" id="uniform-text-opacity" placeholder="0–1" step="0.05" min="0" max="1">
+      <div class="hint">Has no effect on Weather overlay.</div>
     </div>
     <div class="field">
       <label>Font</label>
       <select id="uniform-font">${fontOpts}</select>
     </div>
     <div class="field">
+      <label>Background (panel fill) colour</label>
+      <input type="text" id="uniform-background-color" placeholder="e.g. 0, 0, 0" data-kind="numbers">
+    </div>
+    <div class="field">
+      <label>Background opacity</label>
+      <input type="number" id="uniform-background-opacity" placeholder="0–1" step="0.05" min="0" max="1">
+    </div>
+    <div class="field">
       <label>Outline colour</label>
-      <input type="text" id="uniform-border-color" placeholder="e.g. 255, 255, 255"
-             value="255, 255, 255" data-kind="numbers">
+      <input type="text" id="uniform-border-color" placeholder="e.g. 255, 255, 255" data-kind="numbers">
     </div>
     <div class="field">
       <label>Outline width (px)</label>
-      <input type="number" id="uniform-border-width" value="0" step="1" min="0">
+      <input type="number" id="uniform-border-width" placeholder="0" step="1" min="0">
     </div>
     <div class="field">
       <label>Outline opacity</label>
-      <input type="number" id="uniform-border-opacity" value="0.9" step="0.05" min="0" max="1">
+      <input type="number" id="uniform-border-opacity" placeholder="0–1" step="0.05" min="0" max="1">
+    </div>
+    <div class="field">
+      <label>Alignment</label>
+      <select id="uniform-align">${alignOpts}</select>
+      <div class="hint">Not offered for Calendar, which aligns its day
+        numbers and holiday list separately on its own settings card.</div>
+    </div>
+    <div class="field">
+      <label>Minimum panel width (% of screen width)</label>
+      <input type="number" id="uniform-min-width-pct" placeholder="0" step="1" min="0" max="100">
+      <div class="hint">Not offered for Calendar, same reason as above.</div>
     </div>
     <fieldset class="uniform-targets">
       <legend>Apply to</legend>
@@ -1517,6 +1588,8 @@ function drawUniformStyle() {
   $("#uniform-apply").onclick = applyUniformStyle;
 }
 
+// Returns null for "left blank, skip this field", a value for "use this",
+// or undefined to mean "typed something, but it's not valid".
 function parseRgb(text) {
   const t = (text || "").trim();
   if (!t) return null;
@@ -1525,17 +1598,35 @@ function parseRgb(text) {
   return parts;
 }
 
+function parseNum(text, { min, max, integer } = {}) {
+  const t = (text || "").trim();
+  if (!t) return null;
+  let n = Number(t);
+  if (Number.isNaN(n)) return undefined;  // invalid
+  if (integer) n = Math.round(n);
+  if (min !== undefined) n = Math.max(min, n);
+  if (max !== undefined) n = Math.min(max, n);
+  return n;
+}
+
 async function applyUniformStyle() {
   const result = $("#uniform-result");
   const textColor = parseRgb($("#uniform-text-color").value);
+  const backgroundColor = parseRgb($("#uniform-background-color").value);
   const borderColor = parseRgb($("#uniform-border-color").value);
-  if (textColor === undefined || borderColor === undefined) {
-    result.textContent = "A colour needs exactly three numbers, 0–255, comma separated.";
+  const textOpacity = parseNum($("#uniform-text-opacity").value, { min: 0, max: 1 });
+  const backgroundOpacity = parseNum($("#uniform-background-opacity").value, { min: 0, max: 1 });
+  const borderWidth = parseNum($("#uniform-border-width").value, { min: 0, integer: true });
+  const borderOpacity = parseNum($("#uniform-border-opacity").value, { min: 0, max: 1 });
+  const minWidthPct = parseNum($("#uniform-min-width-pct").value, { min: 0, max: 100 });
+  if ([textColor, backgroundColor, borderColor, textOpacity, backgroundOpacity,
+       borderWidth, borderOpacity, minWidthPct].some((v) => v === undefined)) {
+    result.textContent = "One of the fields isn't valid -- a colour needs exactly " +
+      "three numbers, 0–255, comma separated, and the others need a plain number.";
     return;
   }
   const font = $("#uniform-font").value;
-  const borderWidth = Math.max(0, Math.round(Number($("#uniform-border-width").value) || 0));
-  const borderOpacity = Math.min(1, Math.max(0, Number($("#uniform-border-opacity").value) || 0));
+  const align = $("#uniform-align").value;
 
   const targets = Object.keys(UNIFORM_TARGETS).filter((id) => {
     const el = $("#sheet-extra").querySelector(`[data-uniform-target="${id}"]`);
@@ -1546,14 +1637,28 @@ async function applyUniformStyle() {
     return;
   }
 
+  // concept -> value, where null/UNIFORM_SKIP means "left blank, don't
+  // touch this concept on any widget".
+  const concepts = {
+    text_color: textColor, text_opacity: textOpacity,
+    font: font === UNIFORM_SKIP ? null : font,
+    background_color: backgroundColor, background_opacity: backgroundOpacity,
+    border_color: borderColor, border_width: borderWidth, border_opacity: borderOpacity,
+    align: align === UNIFORM_SKIP ? null : align, min_width_pct: minWidthPct,
+  };
+
   const sets = [];
   for (const id of targets) {
     const t = UNIFORM_TARGETS[id];
-    if (textColor && t.text_color) sets.push([t.text_color, textColor]);
-    sets.push([t.font, font]);
-    if (borderColor) sets.push([t.border_color, borderColor]);
-    sets.push([t.border_width, borderWidth]);
-    sets.push([t.border_opacity, borderOpacity]);
+    for (const [concept, value] of Object.entries(concepts)) {
+      if (value === null) continue;             // nothing to apply for this concept
+      if (!(concept in t)) continue;             // this widget has no such field
+      sets.push([t[concept], value]);
+    }
+  }
+  if (!sets.length) {
+    result.textContent = "Nothing to apply -- fill in at least one field above first.";
+    return;
   }
 
   result.textContent = `Applying to ${targets.length} widget${targets.length === 1 ? "" : "s"}…`;
