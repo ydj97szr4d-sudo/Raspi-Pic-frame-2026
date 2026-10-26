@@ -716,6 +716,7 @@ function openEditor(p) {
   $("#editor-note").className = "muted note";
   $("#editor-note").textContent = "";
   cropCancel();
+  recentreCancel();
   $("#editor-backdrop").setAttribute("data-open", "");
   refreshUndoButton();
 }
@@ -724,6 +725,7 @@ function closeEditor() {
   $("#editor-backdrop").removeAttribute("data-open");
   editorPhoto = null;
   cropCancel();
+  recentreCancel();
 }
 $("#editor-close").onclick = closeEditor;
 $("#editor-backdrop").addEventListener("click", (e) => {
@@ -753,6 +755,7 @@ async function doEdit(op, params) {
     $("#editor-note").className = "muted note";
     $("#editor-note").textContent = "Saved.";
     cropCancel();
+    recentreCancel();
     refreshUndoButton();
     loadLibrary();
   } catch (err) {
@@ -831,6 +834,7 @@ function cropGeometry() {
 }
 
 function cropStart() {
+  recentreCancel();
   const img = $("#editor-img");
   const w = img.clientWidth, h = img.clientHeight;
   const bw = w * 0.7, bh = h * 0.7;
@@ -920,6 +924,122 @@ cropBoxEl.querySelectorAll(".crop-handle").forEach((h) => {
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && editorPhoto) closeEditor();
+});
+
+/* -- recentre: a non-destructive alternative to Crop. Crop throws pixels
+   away for good; Recentre just records, per photo, which part of it the
+   frame's own auto-fit cropping (whenever the photo doesn't match the
+   screen's shape) should keep on screen -- so it can be changed again
+   later, or reset, and the original file never moves. The frame below is
+   drawn at the screen's real aspect ratio and is draggable, not resizable:
+   its shape is fixed by the display, only its position over the photo is
+   the user's choice. Same default centering the backend falls back to when
+   no one has set a focus point -- see media.prepare.DEFAULT_COVER_CENTERING
+   -- so the frame starts where the photo would already be cropped. */
+const DEFAULT_COVER_CENTERING = [0.5, 0.42];
+const recentreFrameEl = $("#recentre-frame");
+let recentreGeom = null;   // {imgW, imgH, frameW, frameH} for the open photo
+let recentreDrag = null;
+
+function recentreSetPixels(left, top) {
+  const { imgW, imgH, frameW, frameH } = recentreGeom;
+  left = clamp(left, 0, Math.max(0, imgW - frameW));
+  top = clamp(top, 0, Math.max(0, imgH - frameH));
+  recentreFrameEl.style.left = `${left}px`;
+  recentreFrameEl.style.top = `${top}px`;
+}
+
+function recentreStart() {
+  cropCancel();
+  const img = $("#editor-img");
+  const imgW = img.clientWidth, imgH = img.clientHeight;
+  if (!imgW || !imgH) return;
+  const d = (state && state.display) || {};
+  const targetRatio = d.width && d.height ? d.width / d.height : imgW / imgH;
+  const imgRatio = imgW / imgH;
+  let frameW, frameH;
+  if (imgRatio > targetRatio) {
+    frameH = imgH;
+    frameW = imgH * targetRatio;
+  } else {
+    frameW = imgW;
+    frameH = imgW / targetRatio;
+  }
+  recentreGeom = { imgW, imgH, frameW, frameH };
+  recentreFrameEl.style.width = `${frameW}px`;
+  recentreFrameEl.style.height = `${frameH}px`;
+  const [fx, fy] = (editorPhoto && editorPhoto.focus_x != null && editorPhoto.focus_y != null)
+    ? [editorPhoto.focus_x, editorPhoto.focus_y]
+    : DEFAULT_COVER_CENTERING;
+  recentreSetPixels(fx * imgW - frameW / 2, fy * imgH - frameH / 2);
+  recentreFrameEl.hidden = false;
+  $("#recentre-hint").hidden = false;
+  $("#editor-recentre-start").hidden = true;
+  $("#editor-recentre-apply").hidden = false;
+  $("#editor-recentre-reset").hidden = false;
+  $("#editor-recentre-cancel").hidden = false;
+}
+$("#editor-recentre-start").onclick = recentreStart;
+
+function recentreCancel() {
+  recentreFrameEl.hidden = true;
+  recentreGeom = null;
+  $("#recentre-hint").hidden = true;
+  $("#editor-recentre-start").hidden = false;
+  $("#editor-recentre-apply").hidden = true;
+  $("#editor-recentre-reset").hidden = true;
+  $("#editor-recentre-cancel").hidden = true;
+}
+$("#editor-recentre-cancel").onclick = recentreCancel;
+
+async function saveFocus(point) {
+  if (!editorPhoto) return;
+  $("#editor-note").className = "muted note is-busy";
+  $("#editor-note").textContent = "Saving…";
+  try {
+    const record = await apiExpect(`/api/library/photo/${editorPhoto.id}/focus`, {
+      method: "POST", body: JSON.stringify(point ? { x: point[0], y: point[1] } : {}),
+    });
+    editorPhoto = record;
+    $("#editor-note").className = "muted note";
+    $("#editor-note").textContent = "Saved.";
+    recentreCancel();
+  } catch (err) {
+    $("#editor-note").className = "muted note is-error";
+    $("#editor-note").textContent = `Could not save that: ${err.message}`;
+  }
+}
+
+$("#editor-recentre-apply").onclick = () => {
+  if (!recentreGeom) return;
+  const { imgW, imgH, frameW, frameH } = recentreGeom;
+  const left = parseFloat(recentreFrameEl.style.left) || 0;
+  const top = parseFloat(recentreFrameEl.style.top) || 0;
+  saveFocus([(left + frameW / 2) / imgW, (top + frameH / 2) / imgH]);
+};
+$("#editor-recentre-reset").onclick = () => saveFocus(null);
+
+function recentrePointerMove(e) {
+  if (!recentreDrag) return;
+  const dx = e.clientX - recentreDrag.x, dy = e.clientY - recentreDrag.y;
+  recentreSetPixels(recentreDrag.left + dx, recentreDrag.top + dy);
+}
+
+function recentrePointerUp() {
+  recentreDrag = null;
+  document.removeEventListener("pointermove", recentrePointerMove);
+  document.removeEventListener("pointerup", recentrePointerUp);
+}
+
+recentreFrameEl.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  recentreDrag = {
+    x: e.clientX, y: e.clientY,
+    left: parseFloat(recentreFrameEl.style.left) || 0,
+    top: parseFloat(recentreFrameEl.style.top) || 0,
+  };
+  document.addEventListener("pointermove", recentrePointerMove);
+  document.addEventListener("pointerup", recentrePointerUp);
 });
 
 /* -------------------------------------------------------------- removed */

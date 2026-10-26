@@ -145,6 +145,16 @@ if HAVE_FASTAPI:
 
         ids: list[int] = []
 
+    class FocusBody(BaseModel):
+        """The Recentre tool: ``{"x": 0.3, "y": 0.6}``, each a 0..1 fraction
+        of the picture, or ``{"x": null, "y": null}`` (or no body at all) to
+        clear it and go back to automatic centering."""
+
+        model_config = ConfigDict(extra="ignore")
+
+        x: float | None = None
+        y: float | None = None
+
 
 # --------------------------------------------------------------------------
 # Keeping an open interface local
@@ -840,6 +850,21 @@ class HttpServer:
                 raise HTTPException(404, "not found")
             return {**_summary(record), "has_backup": True}
 
+        @api.post("/api/library/photo/{file_id}/focus", dependencies=guard)
+        async def set_focus(file_id: int, body: FocusBody):
+            """Recentre: ``{"x": 0.3, "y": 0.6}`` to set, ``{}`` to clear --
+            see PicFrame.set_focus_point. Non-destructive (no backup,
+            nothing to undo), so this always returns the fresh row rather
+            than an edit-style ``has_backup`` flag."""
+            point = None if body.x is None or body.y is None else (body.x, body.y)
+            result = await self.app.set_focus_point(file_id, point)
+            if not result.get("ok"):
+                raise HTTPException(400, result.get("error") or "that didn't take")
+            record = await _in_thread(self.app.library.get, file_id)
+            if record is None:
+                raise HTTPException(404, "not found")
+            return _summary(record)
+
         @api.post("/api/library/photo/{file_id}/undo-edit", dependencies=guard)
         async def undo_edit(file_id: int):
             result = await self.app.undo_edit(file_id)
@@ -1371,6 +1396,11 @@ def _sse(payload: dict) -> str:
 
 
 def _summary(record) -> dict:
+    # width/height are the as-shot pixel dimensions (before EXIF rotation);
+    # orientation is what the editor needs to know whether to swap them --
+    # see PhotoMeta.display_size. Passed through mainly so the Recentre tool
+    # can draw its crop preview at the photo's real aspect ratio instead of
+    # whatever size the <img> element happens to be laid out at.
     return {
         "id": record.id,
         "path": record.path,
@@ -1385,6 +1415,11 @@ def _summary(record) -> dict:
         "location": record.location,
         "tags": record.tags,
         "rating": record.rating,
+        "width": record.width,
+        "height": record.height,
+        "orientation": record.orientation,
+        "focus_x": record.focus_x,
+        "focus_y": record.focus_y,
     }
 
 

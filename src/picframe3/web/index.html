@@ -345,14 +345,21 @@
           <div class="crop-handle" data-corner="sw"></div>
           <div class="crop-handle" data-corner="se"></div>
         </div>
+        <div class="recentre-frame" id="recentre-frame" hidden></div>
       </div>
     </div>
+    <p class="muted note" id="recentre-hint" hidden>Drag the frame to where it should stay
+      when this photo fills the screen.</p>
     <div class="editor-toolbar">
       <button class="btn" id="editor-rotate-left" type="button" title="Rotate left">⟲ Rotate left</button>
       <button class="btn" id="editor-rotate-right" type="button" title="Rotate right">⟳ Rotate right</button>
       <button class="btn" id="editor-crop-start" type="button">Crop…</button>
       <button class="btn btn-primary" id="editor-crop-apply" type="button" hidden>Apply crop</button>
       <button class="btn" id="editor-crop-cancel" type="button" hidden>Cancel crop</button>
+      <button class="btn" id="editor-recentre-start" type="button">Recentre…</button>
+      <button class="btn btn-primary" id="editor-recentre-apply" type="button" hidden>Save position</button>
+      <button class="btn" id="editor-recentre-reset" type="button" hidden>Reset to automatic</button>
+      <button class="btn" id="editor-recentre-cancel" type="button" hidden>Cancel</button>
       <span class="spacer"></span>
       <button class="btn" id="editor-undo" type="button" hidden>Undo edit</button>
       <button class="btn btn-danger" id="editor-remove" type="button">Remove photo</button>

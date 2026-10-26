@@ -72,6 +72,13 @@ class PhotoMeta:
     #: video -- the fixed default centering in ``media.prepare`` is used,
     #: unchanged, in every one of those cases.
     face_box: tuple[float, float, float, float] | None = None
+    #: Where somebody explicitly said "keep this part on screen", via the
+    #: Recentre tool in the library editor: (x, y), each a 0..1 fraction of
+    #: the image. None means nobody has set one -- the face box above (if
+    #: any) or the fixed default centering is used instead, unchanged. Takes
+    #: priority over face_box when both are present: an explicit choice
+    #: should win over an automatic guess.
+    focus_point: tuple[float, float] | None = None
 
     @property
     def is_portrait(self) -> bool:

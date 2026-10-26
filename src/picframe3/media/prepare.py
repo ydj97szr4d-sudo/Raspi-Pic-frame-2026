@@ -329,25 +329,34 @@ def prepare(
     elif fit == "blur":
         out = _fit_blur(src, target, opts)
     else:
-        # A face box only applies to a single, un-paired photo: it was found
-        # in that photo's own coordinates, and pair_portraits() above has
-        # already merged two pictures into one canvas those coordinates no
-        # longer describe -- checked by the original ``metas``, since
-        # ``loaded`` is always one image by this point, merged or not.
+        # A face box or focus point only applies to a single, un-paired
+        # photo: either was found/set in that photo's own coordinates, and
+        # pair_portraits() above has already merged two pictures into one
+        # canvas those coordinates no longer describe -- checked by the
+        # original ``metas``, since ``loaded`` is always one image by this
+        # point, merged or not.
         centering = DEFAULT_COVER_CENTERING
-        face_box = metas[0].face_box if len(metas) == 1 else None
-        if face_box is not None:
-            default_crop = _cover_crop_box(src.size, target, DEFAULT_COVER_CENTERING)
-            if not _contains(default_crop, face_box):
-                # Only moved when the ordinary crop would actually have cut
-                # into the face -- a face that already sits well inside that
-                # crop (e.g. high up but with plenty of margin) is left
-                # alone, rather than re-centring the photo on it for no
-                # reason and cropping more off some other edge than the
-                # fixed centering ever needed to.
-                fx0, fy0, fx1, fy1 = face_box
-                fx, fy = (fx0 + fx1) / 2.0, (fy0 + fy1) / 2.0
-                centering = (min(1.0, max(0.0, fx)), min(1.0, max(0.0, fy)))
+        focus_point = metas[0].focus_point if len(metas) == 1 else None
+        if focus_point is not None:
+            # An explicit choice from the Recentre tool always wins -- over
+            # both the fixed default and any face box -- rather than being
+            # second-guessed by a heuristic the person has already overruled.
+            fx, fy = focus_point
+            centering = (min(1.0, max(0.0, fx)), min(1.0, max(0.0, fy)))
+        else:
+            face_box = metas[0].face_box if len(metas) == 1 else None
+            if face_box is not None:
+                default_crop = _cover_crop_box(src.size, target, DEFAULT_COVER_CENTERING)
+                if not _contains(default_crop, face_box):
+                    # Only moved when the ordinary crop would actually have
+                    # cut into the face -- a face that already sits well
+                    # inside that crop (e.g. high up but with plenty of
+                    # margin) is left alone, rather than re-centring the
+                    # photo on it for no reason and cropping more off some
+                    # other edge than the fixed centering ever needed to.
+                    fx0, fy0, fx1, fy1 = face_box
+                    fx, fy = (fx0 + fx1) / 2.0, (fy0 + fy1) / 2.0
+                    centering = (min(1.0, max(0.0, fx)), min(1.0, max(0.0, fy)))
         out = _fit_cover(src, target, centering)
 
     # Say, on the record, how this picture was laid out.  "Why was that one

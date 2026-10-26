@@ -1455,6 +1455,32 @@ class PicFrame:
         self._dirty = True
         return {"ok": True}
 
+    async def set_focus_point(self, file_id: int,
+                              point: tuple[float, float] | None) -> dict[str, Any]:
+        """Record (or clear, with ``point=None``) where the Recentre tool
+        says a "cover" crop should keep its attention -- a 0..1 fraction of
+        the picture, (x, y). Unlike :meth:`edit_photo`, this never touches
+        the file itself (it only ever changes which region of the original
+        gets shown), so there is no backup to make and nothing for the
+        scanner to re-read: the next time this photo is prepared for
+        display, media.prepare picks the new value straight out of the
+        library row."""
+        record = self.library.get(file_id)
+        if record is None:
+            return {"ok": False, "error": "that picture is not in the library"}
+        if record.is_video:
+            return {"ok": False, "error": "videos have no cover crop to recentre"}
+        if point is not None:
+            x, y = point
+            if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
+                return {"ok": False, "error": "x and y must each be between 0 and 1"}
+        self.library.set_focus_point(file_id, point)
+        # Same caveat edit_photo's own docstring makes: if this is the
+        # picture on screen right now, it keeps today's crop until the next
+        # slide change picks the fresh row up.
+        self._dirty = True
+        return {"ok": True}
+
     async def _restore_removed(self, stored_as: str) -> dict[str, Any]:
         """Put a removed picture back where it came from.
 

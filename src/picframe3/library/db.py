@@ -32,7 +32,7 @@ from ..media.phash import hamming as _hamming64
 
 _log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 _SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -99,6 +99,15 @@ CREATE TABLE IF NOT EXISTS files (
     -- "looked, found nothing" distinction face_checked makes.
     phash         INTEGER,
     phash_checked INTEGER NOT NULL DEFAULT 0,
+    -- Where somebody explicitly said "keep this part on screen", set from
+    -- the Recentre tool in the library editor -- a 0..1 fraction of the
+    -- image, same coordinate space as face_x0..y1. Unlike the face box,
+    -- this is never written by a backfill: NULL simply means nobody has
+    -- set one, and the frame falls back to its ordinary fixed centering
+    -- (or the face box, if that found something) exactly as it always has.
+    -- An explicit focus point always wins over both once it is set.
+    focus_x       REAL,
+    focus_y       REAL,
     indexed_at    REAL    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS files_folder  ON files(folder);
@@ -182,7 +191,7 @@ _COLUMNS = (
     "longitude", "location", "title", "caption", "rating", "duration",
     "play_count", "last_played", "hidden", "held", "digest",
     "face_x0", "face_y0", "face_x1", "face_y1", "face_checked",
-    "phash", "indexed_at",
+    "phash", "focus_x", "focus_y", "indexed_at",
 )
 
 
@@ -228,6 +237,8 @@ class Record:
     face_y1: float | None
     face_checked: bool
     phash: int | None
+    focus_x: float | None
+    focus_y: float | None
     indexed_at: float
     tags: list[str] = None  # type: ignore[assignment]
 
@@ -264,6 +275,11 @@ class Record:
             face_box=(
                 (self.face_x0, self.face_y0, self.face_x1, self.face_y1)
                 if None not in (self.face_x0, self.face_y0, self.face_x1, self.face_y1)
+                else None
+            ),
+            focus_point=(
+                (self.focus_x, self.focus_y)
+                if None not in (self.focus_x, self.focus_y)
                 else None
             ),
         )
@@ -434,6 +450,16 @@ class Library:
                 conn.execute("ALTER TABLE files ADD COLUMN "
                              "phash_checked INTEGER NOT NULL DEFAULT 0")
             _log.info("index upgraded to schema v6 (added phash, phash_checked)")
+        # v7 added the user-set focus point: files.focus_x/focus_y. An older
+        # index has every row at NULL, which (same as a never-checked face
+        # box) means "nobody has said anything" -- the right starting state,
+        # since this is only ever written by somebody using the Recentre
+        # tool, never backfilled.
+        if "focus_x" not in columns:
+            with self.transaction():
+                conn.execute("ALTER TABLE files ADD COLUMN focus_x REAL")
+                conn.execute("ALTER TABLE files ADD COLUMN focus_y REAL")
+            _log.info("index upgraded to schema v7 (added focus_x, focus_y)")
         with self.transaction():
             conn.execute("CREATE INDEX IF NOT EXISTS files_round ON files(play_round)")
             # Unconditional (unlike the ALTERs above) so a fresh database --
@@ -961,6 +987,20 @@ class Library:
                 "UPDATE files SET face_x0=?, face_y0=?, face_x1=?, face_y1=?, "
                 "face_checked=1 WHERE id=?",
                 (x0, y0, x1, y1, file_id),
+            )
+
+    def set_focus_point(self, file_id: int,
+                        point: tuple[float, float] | None) -> None:
+        """Record (or clear) an explicit "keep this part on screen" point,
+        set by the Recentre tool in the library editor -- a 0..1 fraction of
+        the image, (x, y). ``point=None`` clears it, returning the photo to
+        the frame's ordinary fixed centering (or its face box, if it has
+        one) exactly as if nobody had ever set one."""
+        x, y = point if point is not None else (None, None)
+        with self.transaction() as conn:
+            conn.execute(
+                "UPDATE files SET focus_x=?, focus_y=? WHERE id=?",
+                (x, y, file_id),
             )
 
     def count_faces_missing(self) -> int:

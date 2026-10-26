@@ -655,6 +655,18 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin-top: 6px; }
 .crop-handle[data-corner="ne"] { top: -8px; right: -8px; cursor: nesw-resize; }
 .crop-handle[data-corner="sw"] { bottom: -8px; left: -8px; cursor: nesw-resize; }
 .crop-handle[data-corner="se"] { bottom: -8px; right: -8px; cursor: nwse-resize; }
+/* Recentre: unlike the crop box, this one can't be resized -- its size is
+   the frame's own screen shape, fixed the moment Recentre opens -- only
+   dragged, to say which part of the photo should stay inside it. */
+.recentre-frame {
+  position: absolute; border: 2px solid #fff;
+  box-shadow: 0 0 0 2000px #0007; cursor: move;
+  touch-action: none;
+}
+.recentre-frame::after {
+  content: ""; position: absolute; inset: 0;
+  border: 1px dashed rgba(255, 255, 255, 0.55);
+}
 .editor-toolbar {
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
   padding: 12px 20px; border-top: 2px solid var(--rule);
