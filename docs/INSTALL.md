@@ -426,12 +426,20 @@ actually running from.)
 **Cropped photos cut off faces** — turn on `viewer.detect_faces` in the
 settings page, then install OpenCV so it can actually find them:
 `~/.local/share/picframe3/venv/bin/pip install opencv-python-headless`
-(or `picframe3[faces]` from a source checkout). It only looks for *where* a
-face-shaped region is, never *whose* — nothing is identified or kept beyond
-one crop point per photograph. Detection runs a few photographs at a time in
-the background, the same way reverse-geocoding backfills a library, so a
-large collection catches up over a few minutes rather than all at once;
-`picframe3 doctor` says how many pictures are still waiting for a look.
+(or `picframe3[faces]` from a source checkout), then re-run the installer
+(`bash packaging/update.sh`) so it can fetch the YuNet detection model —
+without it, detection still runs, just on OpenCV's older bundled Haar
+cascade, which misses a face that is turned to the side, tilted, or small in
+a group far more often. `picframe3 doctor` says which of the two is active.
+Either way, it only looks for *where* a face-shaped region is, never *whose*
+— nothing is identified or kept beyond one crop point per photograph.
+Detection runs a few photographs at a time in the background, the same way
+reverse-geocoding backfills a library, so a large collection catches up over
+a few minutes rather than all at once; `picframe3 doctor` says how many
+pictures are still waiting for a look. If a particular photo still gets
+cropped wrong, the Recentre tool in the library editor (not the destructive
+Crop) lets you fix that one photo directly and always wins over whatever
+detection found.
 
 **Photographs have stopped arriving over Syncthing** — `picframe3 sync` says
 where it stands: installed, running, which folder it keeps, who it is paired

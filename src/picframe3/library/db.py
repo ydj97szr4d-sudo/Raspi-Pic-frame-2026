@@ -32,7 +32,7 @@ from ..media.phash import hamming as _hamming64
 
 _log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 _SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -460,6 +460,20 @@ class Library:
                 conn.execute("ALTER TABLE files ADD COLUMN focus_x REAL")
                 conn.execute("ALTER TABLE files ADD COLUMN focus_y REAL")
             _log.info("index upgraded to schema v7 (added focus_x, focus_y)")
+        # v8 added no column: media.face swapped its detector from a plain
+        # Haar cascade to YuNet (see that module), which finds considerably
+        # more real faces -- missing a profile, a tilted head, or a small
+        # face in a crowd was the normal case for the cascade, not a bug in
+        # any one photo.  A face it DID find is left alone (no reason to
+        # doubt a hit), but every "looked, found nothing" from the weaker
+        # detector is worth a second look, so only those get re-queued --
+        # keyed on schema_version rather than a column, since nothing about
+        # the table shape changed.
+        if version < 8:
+            with self.transaction():
+                conn.execute(
+                    "UPDATE files SET face_checked=0 WHERE face_checked=1 AND face_x0 IS NULL")
+            _log.info("index upgraded to schema v8 (re-queued undetected faces for YuNet)")
         with self.transaction():
             conn.execute("CREATE INDEX IF NOT EXISTS files_round ON files(play_round)")
             # Unconditional (unlike the ALTERs above) so a fresh database --

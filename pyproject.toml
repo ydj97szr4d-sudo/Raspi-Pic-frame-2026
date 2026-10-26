@@ -59,10 +59,12 @@ input = ["evdev>=1.7,<3"]
 gpio  = ["gpiozero>=2.0,<3", "lgpio>=0.2,<1"]
 heif  = ["pillow-heif>=0.16,<2"]
 video = ["PyGObject>=3.46,<4"]
-# For viewer.detect_faces: a bundled Haar cascade only, no model download and
-# no per-person data -- see media/face.py's module docstring. Not in `all`:
-# it is a heavier wheel than the other extras and, unlike them, changes what
-# the frame does rather than just what it can open, so it stays opt-in.
+# For viewer.detect_faces: no per-person data, ever -- see media/face.py's
+# module docstring. install.sh also fetches a small (~100 KB) YuNet model for
+# this if it can (packaging/fetch_face_model.sh); without it, or offline, this
+# alone still gives the older bundled Haar cascade, no download needed. Not in
+# `all`: it is a heavier wheel than the other extras and, unlike them, changes
+# what the frame does rather than just what it can open, so it stays opt-in.
 faces = ["opencv-python-headless>=4.9,<5"]
 # `all` is what install.sh installs, so it is everything the frame can use
 # that pip can actually deliver on a Pi.  GPIO buttons are in it: they are

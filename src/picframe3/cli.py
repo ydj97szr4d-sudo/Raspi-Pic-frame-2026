@@ -406,7 +406,13 @@ def cmd_doctor(args) -> int:
     if not config.viewer.detect_faces:
         check("face-aware cropping", True, "off (viewer.detect_faces)")
     elif face_module.available():
-        check("face-aware cropping", True, "OpenCV found")
+        backend = face_module.backend()
+        if backend == "yunet":
+            check("face-aware cropping", True, "OpenCV found (YuNet)")
+        else:
+            check("face-aware cropping", True,
+                  "OpenCV found (older bundled Haar cascade -- misses more; "
+                  "re-run the installer to fetch the better YuNet model)")
     else:
         check("face-aware cropping", False, "turned on, but OpenCV is not installed",
               f"{_install_hint('faces')}   (or it just stays off)")

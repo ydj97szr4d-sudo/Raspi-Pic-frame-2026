@@ -122,7 +122,7 @@ echo "   Initializing — the whole install can take several minutes on a Pi."
 echo "   Some steps stay quiet for a while; that is normal, nothing has frozen."
 
 # ---------------------------------------------------------------- 1. packages
-step "1/6  System packages"
+step "1/7  System packages"
 # Deliberately short. There is no compositor, no X server and no SDL here:
 # the frame renders through EGL onto DRM/KMS by itself.
 #
@@ -195,7 +195,7 @@ else
 fi
 
 # ------------------------------------------------------------------ 2. groups
-step "2/6  Permissions"
+step "2/7  Permissions"
 # video + render: the DRM device.  input: keyboard and touchscreen, which are
 # read straight from evdev because there is no display server to do it for us.
 # The tick has to depend on the result. Printed unconditionally it told the
@@ -210,7 +210,7 @@ else
 fi
 
 # -------------------------------------------------------------------- 3. venv
-step "3/6  picframe3"
+step "3/7  picframe3"
 if [ "$MODE" = "download" ]; then
   WORKDIR="$(mktemp -d)"
   echo "   fetching ${REPO}…"
@@ -264,9 +264,16 @@ fi
 $SUDO ln -sfn "$VENV/bin/picframe3" "$SHIM"
 ok "$("$VENV/bin/picframe3" --version) installed, 'picframe3' on your PATH"
 
-# ------------------------------------------------------------------- 4. setup
+# ---------------------------------------------------------- 4. face detection
+# Only does anything if the `faces` extra (opencv-python-headless) actually
+# got installed above -- see fetch_face_model.sh's own header. Never fatal:
+# install.sh carries on whether or not this found a network.
+step "4/7  Face detection model"
+bash "$SOURCE/packaging/fetch_face_model.sh" "$VENV/bin" || true
+
+# ------------------------------------------------------------------- 5. setup
 if [ "$UPDATE" -eq 1 ] && [ -z "${PICFRAME_SETUP:-}" ]; then
-  step "4/6  Keeping your settings"
+  step "5/7  Keeping your settings"
   # An update must not re-interrogate someone who already answered. --yes
   # here reads the existing config, writes it straight back, and refreshes the
   # systemd unit so a renamed option or a moved venv takes effect.
@@ -274,21 +281,21 @@ if [ "$UPDATE" -eq 1 ] && [ -z "${PICFRAME_SETUP:-}" ]; then
   ok "$CONFIG untouched; service unit, system rules and date languages refreshed"
   echo "   Run 'picframe3 setup' to change any of your answers."
 elif [ -n "${PICFRAME_YES:-}" ]; then
-  step "4/6  Setting it up"
+  step "5/7  Setting it up"
   "$SHIM" --config "$CONFIG" setup --yes --venv-bin "$VENV/bin"
 elif [ -r /dev/tty ]; then
-  step "4/6  Setting it up"
+  step "5/7  Setting it up"
   # Piped from the web, stdin is this script — so hand the wizard the
   # terminal explicitly, or it would see no tty and silently take every
   # default, which is not an install anyone asked for.
   "$SHIM" --config "$CONFIG" setup --venv-bin "$VENV/bin" < /dev/tty
 else
-  step "4/6  Setting it up"
+  step "5/7  Setting it up"
   "$SHIM" --config "$CONFIG" setup --yes --venv-bin "$VENV/bin"
 fi
 
-# ----------------------------------------------------------------- 5. restart
-step "5/6  The running frame"
+# ----------------------------------------------------------------- 6. restart
+step "6/7  The running frame"
 if [ "$WAS_RUNNING" -eq 1 ]; then
   # It was running the old code a moment ago, and nothing picks up new Python
   # without a restart -- otherwise the owner upgrades and sees no change.
@@ -305,8 +312,8 @@ else
   ok "nothing to restart yet"
 fi
 
-# ------------------------------------------------------------------- 6. check
-step "6/6  Checking"
+# ------------------------------------------------------------------- 7. check
+step "7/7  Checking"
 "$SHIM" --config "$CONFIG" doctor || true
 
 echo
