@@ -118,7 +118,8 @@ step "1/6  System packages"
 sudo apt-get update -qq
 sudo apt-get install -y --no-install-recommends \
   swig python3-dev python3-venv build-essential liblgpio-dev \
-  mosquitto mosquitto-clients v4l-utils ffmpeg
+  mosquitto mosquitto-clients v4l-utils ffmpeg \
+  libraqm0 libfribidi0 fonts-lohit-deva
 ok "system packages present"
 
 # -------------------------------------------------------------- 2. mosquitto
@@ -155,7 +156,7 @@ sudo usermod -aG gpio "$USER" || true
 ok "companion venv ready"
 
 # -------------------------------------------------- 4. the three scripts
-step "4/6  Writing dht_mqtt.py, motion_display.py, video_proxy.py"
+step "4/6  Writing dht_mqtt.py, panchang.py, motion_display.py, video_proxy.py"
 sed -e "s|__OWM_KEY__|$OWM_KEY|" -e "s|__LAT__|$LAT|" -e "s|__LON__|$LON|" \
     -e "s|__SCREEN_W__|$SCREEN_W|" -e "s|__SCREEN_H__|$SCREEN_H|" \
     "$COMPANIONS_DIR/dht_mqtt.py" > "$HOME/dht_mqtt.py"
@@ -163,6 +164,8 @@ sed -e "s|__PIR_PIN__|$PIR_PIN|" -e "s|__CEC_DEVICE__|$CEC_DEVICE|" \
     -e "s|__PHYS_ADDR__|$PHYS_ADDR|" \
     "$COMPANIONS_DIR/motion_display.py" > "$HOME/motion_display.py"
 cp "$COMPANIONS_DIR/video_proxy.py" "$HOME/video_proxy.py"
+# Hindi calendar arithmetic; dht_mqtt.py imports it from its own folder.
+cp "$COMPANIONS_DIR/panchang.py" "$HOME/panchang.py"
 chmod 755 "$HOME/dht_mqtt.py" "$HOME/motion_display.py" "$HOME/video_proxy.py"
 ok "scripts written to $HOME"
 

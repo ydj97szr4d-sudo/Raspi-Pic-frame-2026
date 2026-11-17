@@ -580,6 +580,10 @@ class CalendarConfig:
 
     #: Off removes the widget entirely; nothing is drawn or measured.
     enabled: bool = True
+    #: Which calendar is drawn: "english" (this widget) or "hindi" (the
+    #: whole-month panchang page configured in the hindi_calendar section).
+    #: Only one is ever shown; ``enabled`` above switches either off.
+    style: str = "english"                    # english | hindi
     #: Inset from the top-left corner, percent of screen width/height --
     #: [x, y]. Mirrors viewer.clock_offset_pct, which insets from the
     #: bottom-right for the weather caption.
@@ -661,6 +665,61 @@ class CalendarConfig:
     #: Left/centre/right justification of the "D: Festival Name" lines
     #: below the grid, within the widget's own full width.
     holiday_align: str = "L"              # L | C | R
+
+
+@dataclass
+class HindiCalendarConfig:
+    """The Hindi wall-calendar page, drawn by ``dht_mqtt.py`` in place of the
+    English calendar widget when ``calendar.style`` is "hindi".
+
+    A whole month, Sunday first, in Devanagari numerals, with the tithi
+    (lunar day) under each date, Vikram Samvat and the lunar months in the
+    title, and festivals in Hindi. Tithis are computed from the sun's and
+    moon's positions, not tabulated, so any year works; the festival names
+    come from the same gazetted lists as the English calendar (2026-2027).
+    Needs a Devanagari font on the Pi (fonts-lohit-deva or fonts-noto-core)
+    and Pillow's libraqm for correct conjuncts -- install_companions.sh
+    installs both.
+    """
+
+    #: Inset from the top-left corner, percent of screen width/height.
+    offset_pct: list[float] = field(default_factory=lambda: [3.0, 3.0])
+    #: Width of one day cell, in real screen pixels. Everything else on the
+    #: page -- numerals, tithi text, title -- scales with it, so this is the
+    #: one number that makes the whole calendar bigger or smaller.
+    cell_width: int = 100
+    #: Red, green, blue, 0-255. Day numbers, tithis and the title.
+    text_color: list[int] = field(default_factory=lambda: [255, 255, 255])
+    #: 0 (invisible) - 1 (fully opaque).
+    text_opacity: float = 0.92
+    #: Red, green, blue, 0-255. The panel behind the page.
+    background_color: list[int] = field(default_factory=lambda: [0, 0, 0])
+    #: 0 (no panel) - 1 (solid panel).
+    background_opacity: float = 0.45
+    #: Colour of Sundays and closed (gazetted) holidays -- a HOLIDAY_PALETTE
+    #: name, same as calendar.holiday_color.
+    holiday_color: str = "dull_red"
+    #: Whether the optional (restricted) holidays are shown.
+    show_restricted: bool = True
+    #: Colour of those optional holidays.
+    restricted_color: str = "amber"
+    #: Whether each day carries its tithi (lunar day).
+    show_tithi: bool = True
+    #: Whether the festival list under the grid is shown.
+    show_list: bool = True
+    #: Path of a Devanagari .ttf/.otf to use instead of the one found on the
+    #: system. "" (default) picks Noto Sans Devanagari, Mukta or Lohit.
+    font_family: str = ""
+    #: Red, green, blue, 0-255. Outline around the panel.
+    border_color: list[int] = field(default_factory=lambda: [255, 255, 255])
+    #: Outline thickness in pixels. 0 (default) draws none.
+    border_width: int = 0
+    #: 0 (invisible) - 1 (fully opaque). Only matters when border_width > 0.
+    border_opacity: float = 0.9
+    #: Red, green, blue, 0-255. The "today" highlight's fill.
+    today_fill_color: list[int] = field(default_factory=lambda: [255, 255, 255])
+    #: 0 (invisible) - 1 (fully opaque).
+    today_fill_opacity: float = 0.92
 
 
 @dataclass
@@ -819,6 +878,7 @@ class Config:
     video_proxy: VideoProxyConfig = field(default_factory=VideoProxyConfig)
     overlay: OverlayConfig = field(default_factory=OverlayConfig)
     calendar: CalendarConfig = field(default_factory=CalendarConfig)
+    hindi_calendar: HindiCalendarConfig = field(default_factory=HindiCalendarConfig)
     clock: ClockConfig = field(default_factory=ClockConfig)
     status: StatusConfig = field(default_factory=StatusConfig)
     brand: BrandConfig = field(default_factory=BrandConfig)

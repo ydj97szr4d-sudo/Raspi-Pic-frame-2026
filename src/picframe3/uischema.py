@@ -49,6 +49,9 @@ SECTION_PROSE = {
     "overlay": "The weather caption and its idle-countdown dot grid.",
     "calendar": "The upper-left calendar widget: today's date and a small "
                 "month grid.",
+    "hindi_calendar": "The Hindi wall-calendar page (tithi, Vikram Samvat, "
+                      "festivals in Hindi), shown instead of the English "
+                      "calendar when the Calendar style is Hindi.",
     "clock": "A custom-drawn clock with its own translucent panel.",
     "status": "A small status strip -- outdoor sensor link, and more to come.",
     "brand": "The small animated maker's mark in a corner of the screen.",
@@ -73,6 +76,7 @@ SECTION_LABELS = {
     "video_proxy": "Video proxy",
     "overlay": "Weather caption and dots",
     "calendar": "Calendar widget",
+    "hindi_calendar": "Hindi calendar",
     "clock": "Clock widget",
     "status": "Status strip",
     "brand": "Brand mark",
@@ -265,6 +269,7 @@ NOTES = {
     "overlay.align": "Left, centre or right justification of the caption+dot-grid block within its own panel. Only visible once min_width_pct stretches the panel beyond the content's own width, and only when background_opacity > 0.",
     "overlay.min_width_pct": "Stretches the panel to at least this percent of the screen's width when the content is narrower. 0 leaves it hugging the content. Only matters when background_opacity > 0.",
     "calendar.enabled": "Off removes the widget entirely.",
+    "calendar.style": "Which calendar to show: the English one, or the Hindi panchang page (set up in the Hindi calendar section). Only one is drawn at a time; Enabled switches either off.",
     "calendar.offset_pct": "Inset from the top-left corner, percent of screen width/height — [x, y].",
     "calendar.size": "Size of the “today” line (e.g. “Saturday, 17 October”), in real screen pixels (drawn directly at your screen's own resolution, not through PicFrame3's scaled renderer).",
     "calendar.grid_size": "Size of the month grid's day numbers and weekday-header row (M T W T F S S), in real screen pixels — independent of the “today” line size above.",
@@ -292,6 +297,23 @@ NOTES = {
     "calendar.today_border_width": "Outline thickness in pixels. 0 (default) draws no outline.",
     "calendar.today_border_opacity": "0–1. Only matters when today_border_width > 0.",
     "calendar.holiday_align": "Left, centre or right justification of the “D: Festival Name” lines below the grid, within the widget's own full width.",
+    "hindi_calendar.offset_pct": "Inset from the top-left corner, percent of screen width/height — [x, y].",
+    "hindi_calendar.cell_width": "Width of one day cell in real screen pixels. The numerals, tithi text and title all scale with it, so this alone makes the whole page bigger or smaller (a month is 7 cells wide).",
+    "hindi_calendar.text_color": "Red, green, blue, 0–255. Day numbers, tithis and the title.",
+    "hindi_calendar.text_opacity": "0–1.",
+    "hindi_calendar.background_color": "Red, green, blue, 0–255. The panel behind the page.",
+    "hindi_calendar.background_opacity": "0 (no panel) – 1 (solid panel).",
+    "hindi_calendar.holiday_color": "Colour of Sundays, closed (gazetted) holidays and their lines in the list.",
+    "hindi_calendar.show_restricted": "Also show the optional (restricted) holidays.",
+    "hindi_calendar.restricted_color": "Colour of the optional holidays. Keep it different from the holiday colour.",
+    "hindi_calendar.show_tithi": "Print the tithi (lunar day, with शुक्ल/कृष्ण paksha) under every date. Off leaves just the numerals and festivals.",
+    "hindi_calendar.show_list": "Show the festival list under the grid.",
+    "hindi_calendar.font_family": "Path of a Devanagari font file (.ttf/.otf) to use instead of the one found on the system. Empty picks Noto Sans Devanagari, Mukta or Lohit automatically.",
+    "hindi_calendar.border_color": "Red, green, blue, 0–255. Outline around the panel.",
+    "hindi_calendar.border_width": "Outline thickness in pixels. 0 (default) draws none.",
+    "hindi_calendar.border_opacity": "0–1. Only matters when the outline width is above 0.",
+    "hindi_calendar.today_fill_color": "Red, green, blue, 0–255. Fill of the “today” highlight.",
+    "hindi_calendar.today_fill_opacity": "0–1.",
     "clock.enabled": "Off removes the widget entirely. Turn off viewer.show_clock too if it's on, so you don't get two clocks.",
     "clock.position": "Which corner it's inset from.",
     "clock.offset_pct": "Inset from that corner, percent of screen width/height — [x, y].",
@@ -423,6 +445,7 @@ LABELS = {
     "calendar.grid_size": "Date grid text size (px)",
     "calendar.grid_row_gap": "Date grid row spacing (px)",
     "calendar.square_padding": "Today-square padding (px)",
+    "calendar.style": "Calendar style",
     "calendar.text_color": "Font colour",
     "calendar.text_opacity": "Font opacity",
     "calendar.background_color": "Background colour",
@@ -445,6 +468,23 @@ LABELS = {
     "calendar.today_border_width": "“Today” square outline width (px)",
     "calendar.today_border_opacity": "“Today” square outline opacity",
     "calendar.holiday_align": "Holiday list alignment",
+    "hindi_calendar.offset_pct": "Inset from corner (% x, y)",
+    "hindi_calendar.cell_width": "Day cell width (px)",
+    "hindi_calendar.text_color": "Font colour",
+    "hindi_calendar.text_opacity": "Font opacity",
+    "hindi_calendar.background_color": "Background colour",
+    "hindi_calendar.background_opacity": "Background opacity",
+    "hindi_calendar.holiday_color": "Holiday colour",
+    "hindi_calendar.show_restricted": "Show optional holidays",
+    "hindi_calendar.restricted_color": "Optional holiday colour",
+    "hindi_calendar.show_tithi": "Show tithi under each date",
+    "hindi_calendar.show_list": "Show festival list",
+    "hindi_calendar.font_family": "Devanagari font file",
+    "hindi_calendar.border_color": "Outline colour",
+    "hindi_calendar.border_width": "Outline width (px)",
+    "hindi_calendar.border_opacity": "Outline opacity",
+    "hindi_calendar.today_fill_color": "“Today” fill",
+    "hindi_calendar.today_fill_opacity": "“Today” fill opacity",
     "clock.position": "Corner",
     "clock.offset_pct": "Inset from corner (% x, y)",
     "clock.size": "Time text size (px)",
@@ -640,7 +680,7 @@ def redact(data: dict) -> dict:
 #: the config file and takes effect when the frame restarts, and the page says
 #: so rather than leaving the owner to wonder why nothing happened.
 LIVE_SECTIONS = {"viewer", "slideshow", "geo", "power", "health", "network",
-                 "sync", "motion", "video_proxy", "overlay", "calendar",
+                 "sync", "motion", "video_proxy", "overlay", "calendar", "hindi_calendar",
                  "clock", "status", "appearance"}
 LIVE_KEYS = {
     "display.brightness", "display.rotate", "display.background",
@@ -771,6 +811,15 @@ CHOICES: dict[str, list[str]] = {
         "teal", "sky_blue", "indigo", "violet", "magenta", "slate_grey", "white",
     ],
     "calendar.restricted_color": [
+        "dull_red", "crimson", "orange", "amber", "olive", "forest_green",
+        "teal", "sky_blue", "indigo", "violet", "magenta", "slate_grey", "white",
+    ],
+    "calendar.style": ["english", "hindi"],
+    "hindi_calendar.holiday_color": [
+        "dull_red", "crimson", "orange", "amber", "olive", "forest_green",
+        "teal", "sky_blue", "indigo", "violet", "magenta", "slate_grey", "white",
+    ],
+    "hindi_calendar.restricted_color": [
         "dull_red", "crimson", "orange", "amber", "olive", "forest_green",
         "teal", "sky_blue", "indigo", "violet", "magenta", "slate_grey", "white",
     ],
@@ -1210,6 +1259,17 @@ def _state_calendar(c) -> str:
             f"· {panel}")
 
 
+def _state_hindi_calendar(c) -> str:
+    cal, h = c.calendar, c.hindi_calendar
+    if not cal.enabled:
+        return "Calendar off — nothing drawn"
+    if cal.style != "hindi":
+        return "Not shown — Calendar style is English"
+    x, y = h.offset_pct
+    return (f"Top-left, {_n(x)}%/{_n(y)}% inset · cells {h.cell_width} px wide "
+            f"· panel {_ratio(h.background_opacity)}")
+
+
 def _state_clock(c) -> str:
     clk = c.clock
     if not clk.enabled:
@@ -1379,7 +1439,7 @@ JOBS = [
     {"name": "calendar", "kicker": "Calendar",
      "title": "Today's date and the month grid",
      "section": "calendar", "state": _state_calendar,
-     "fields": ["calendar.enabled", "calendar.offset_pct", "calendar.size",
+     "fields": ["calendar.enabled", "calendar.style", "calendar.offset_pct", "calendar.size",
                 "calendar.grid_size", "calendar.grid_row_gap",
                 "calendar.square_padding",
                 "calendar.text_color", "calendar.text_opacity",
@@ -1392,6 +1452,18 @@ JOBS = [
                 "calendar.today_fill_color", "calendar.today_fill_opacity",
                 "calendar.today_border_color", "calendar.today_border_width",
                 "calendar.today_border_opacity"]},
+    {"name": "hindi_calendar", "kicker": "Hindi calendar",
+     "title": "Whole-month Hindi panchang page",
+     "section": "hindi_calendar", "state": _state_hindi_calendar,
+     "fields": ["hindi_calendar.offset_pct", "hindi_calendar.cell_width",
+                "hindi_calendar.text_color", "hindi_calendar.text_opacity",
+                "hindi_calendar.background_color", "hindi_calendar.background_opacity",
+                "hindi_calendar.holiday_color", "hindi_calendar.show_restricted",
+                "hindi_calendar.restricted_color", "hindi_calendar.show_tithi",
+                "hindi_calendar.show_list", "hindi_calendar.font_family",
+                "hindi_calendar.border_color", "hindi_calendar.border_width",
+                "hindi_calendar.border_opacity",
+                "hindi_calendar.today_fill_color", "hindi_calendar.today_fill_opacity"]},
     {"name": "clock", "kicker": "Clock",
      "title": "A custom clock with its own panel",
      "section": "clock", "state": _state_clock,

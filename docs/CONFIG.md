@@ -322,6 +322,7 @@ The upper-left calendar widget: today's date and a small month grid.
 | key | type | default | |
 |---|---|---|---|
 | `enabled` | boolean | `True` | Off removes the widget entirely. |
+| `style` | string | `'english'` | Which calendar to show: the English one, or the Hindi panchang page (set up in the Hindi calendar section). Only one is drawn at a time; Enabled switches either off. |
 | `offset_pct` | list of numbers | `[3.0, 3.0]` | Inset from the top-left corner, percent of screen width/height — [x, y]. |
 | `size` | integer | `34` | Size of the “today” line (e.g. “Saturday, 17 October”), in real screen pixels (drawn directly at your screen's own resolution, not through PicFrame3's scaled renderer). |
 | `grid_size` | integer | `20` | Size of the month grid's day numbers and weekday-header row (M T W T F S S), in real screen pixels — independent of the “today” line size above. |
@@ -349,6 +350,30 @@ The upper-left calendar widget: today's date and a small month grid.
 | `today_border_width` | integer | `0` | Outline thickness in pixels. 0 (default) draws no outline. |
 | `today_border_opacity` | number | `0.9` | 0–1. Only matters when today_border_width > 0. |
 | `holiday_align` | string | `'L'` | Left, centre or right justification of the “D: Festival Name” lines below the grid, within the widget's own full width. |
+
+## `hindi_calendar`
+
+The Hindi wall-calendar page (tithi, Vikram Samvat, festivals in Hindi), shown instead of the English calendar when the Calendar style is Hindi.
+
+| key | type | default | |
+|---|---|---|---|
+| `offset_pct` | list of numbers | `[3.0, 3.0]` | Inset from the top-left corner, percent of screen width/height — [x, y]. |
+| `cell_width` | integer | `100` | Width of one day cell in real screen pixels. The numerals, tithi text and title all scale with it, so this alone makes the whole page bigger or smaller (a month is 7 cells wide). |
+| `text_color` | list of integers | `[255, 255, 255]` | Red, green, blue, 0–255. Day numbers, tithis and the title. |
+| `text_opacity` | number | `0.92` | 0–1. |
+| `background_color` | list of integers | `[0, 0, 0]` | Red, green, blue, 0–255. The panel behind the page. |
+| `background_opacity` | number | `0.45` | 0 (no panel) – 1 (solid panel). |
+| `holiday_color` | string | `'dull_red'` | Colour of Sundays, closed (gazetted) holidays and their lines in the list. |
+| `show_restricted` | boolean | `True` | Also show the optional (restricted) holidays. |
+| `restricted_color` | string | `'amber'` | Colour of the optional holidays. Keep it different from the holiday colour. |
+| `show_tithi` | boolean | `True` | Print the tithi (lunar day, with शुक्ल/कृष्ण paksha) under every date. Off leaves just the numerals and festivals. |
+| `show_list` | boolean | `True` | Show the festival list under the grid. |
+| `font_family` | string | *(empty)* | Path of a Devanagari font file (.ttf/.otf) to use instead of the one found on the system. Empty picks Noto Sans Devanagari, Mukta or Lohit automatically. |
+| `border_color` | list of integers | `[255, 255, 255]` | Red, green, blue, 0–255. Outline around the panel. |
+| `border_width` | integer | `0` | Outline thickness in pixels. 0 (default) draws none. |
+| `border_opacity` | number | `0.9` | 0–1. Only matters when the outline width is above 0. |
+| `today_fill_color` | list of integers | `[255, 255, 255]` | Red, green, blue, 0–255. Fill of the “today” highlight. |
+| `today_fill_opacity` | number | `0.92` | 0–1. |
 
 ## `clock`
 

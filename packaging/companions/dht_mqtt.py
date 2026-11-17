@@ -9,7 +9,12 @@ import board
 import adafruit_dht
 import paho.mqtt.client as mqtt
 import yaml
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, features as pil_features
+
+try:   # sits next to this file on the Pi; only the Hindi calendar needs it
+    import panchang
+except ImportError:
+    panchang = None
 
 BROKER = "localhost"
 PORT = 1883
@@ -213,6 +218,7 @@ def load_overlay_settings():
 #: Used only if config.yaml has no "calendar" section yet.
 DEFAULT_CALENDAR_SETTINGS = {
     "enabled": True,
+    "style": "english",
     "offset_pct": [3.0, 3.0],
     "size": 34,
     "grid_size": 20,
@@ -778,6 +784,9 @@ def write_calendar(canvas):
     settings = load_calendar_settings()
     if not settings["enabled"]:
         return
+    if str(settings.get("style", "english")).lower() == "hindi":
+        write_hindi_calendar(canvas)
+        return
 
     size = int(settings["size"])
     grid_size = int(settings["grid_size"])
@@ -826,6 +835,296 @@ def write_calendar(canvas):
     x = int(SCREEN_W * float(x_pct) / 100)
     y = int(SCREEN_H * float(y_pct) / 100)
     canvas.alpha_composite(widget, (x, y))
+
+
+
+#: Used only if config.yaml has no "hindi_calendar" section yet.
+DEFAULT_HINDI_CALENDAR_SETTINGS = {
+    "offset_pct": [3.0, 3.0],
+    "cell_width": 100,
+    "text_color": [255, 255, 255],
+    "text_opacity": 0.92,
+    "background_color": [0, 0, 0],
+    "background_opacity": 0.45,
+    "holiday_color": "dull_red",
+    "show_restricted": True,
+    "restricted_color": "amber",
+    "show_tithi": True,
+    "show_list": True,
+    "font_family": "",
+    "border_color": [255, 255, 255],
+    "border_width": 0,
+    "border_opacity": 0.9,
+    "today_fill_color": [255, 255, 255],
+    "today_fill_opacity": 0.92,
+}
+
+
+def load_hindi_calendar_settings():
+    """hindi_calendar.* from config.yaml, read fresh every call (web Settings
+    page, section "Hindi calendar")."""
+    settings = dict(DEFAULT_HINDI_CALENDAR_SETTINGS)
+    try:
+        with open(_cfg_path, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    except OSError:
+        return settings
+    settings.update(cfg.get("hindi_calendar") or {})
+    return settings
+
+
+#: Fonts that can draw Devanagari, best first. The Pi install pulls in
+#: fonts-lohit-deva (small); fonts-noto-core / Mukta win when present.
+_DEVANAGARI_FONT_GLOBS = [
+    "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSansDevanagari*.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansDevanagari*.ttf",
+    "/usr/share/fonts/truetype/mukta/Mukta-Regular.ttf",
+    "/usr/share/fonts/truetype/lohit-devanagari/Lohit-Devanagari.ttf",
+    "/usr/share/fonts/truetype/**/*Devanagari*.ttf",
+    "/usr/share/fonts/**/*Devanagari*.[to]tf",
+    "/usr/share/fonts/**/Mukta-Regular.ttf",
+]
+_warned_hindi = set()
+
+
+def _warn_hindi_once(key, message):
+    if key not in _warned_hindi:
+        _warned_hindi.add(key)
+        print(f"[hindi calendar] {message}", flush=True)
+
+
+def _resolve_devanagari_font(override=""):
+    """Path of a font file with Devanagari glyphs, or None."""
+    import glob
+    if override and os.path.isfile(os.path.expanduser(override)):
+        return os.path.expanduser(override)
+    for pattern in _DEVANAGARI_FONT_GLOBS:
+        hits = sorted(glob.glob(pattern, recursive=True))
+        if hits:
+            return hits[0]
+    return None
+
+
+def _deva_font(path, px):
+    """A Devanagari-capable font at `px`. Conjuncts and vowel signs only come
+    out right with Pillow's RAQM layout (libraqm); without it text is drawn
+    unshaped and a warning is logged once."""
+    px = max(6, int(px))
+    if pil_features.check("raqm"):
+        return ImageFont.truetype(path, px, layout_engine=ImageFont.Layout.RAQM)
+    _warn_hindi_once("raqm", "Pillow has no libraqm, so Devanagari conjuncts "
+                              "will not shape correctly (apt install libraqm0 libfribidi0)")
+    return ImageFont.truetype(path, px)
+
+
+_PANCHANG_MONTH_CACHE = {}
+
+
+def _panchang_month(year, month):
+    """{day: panchang.Day} for every day of the month, cached."""
+    key = (year, month)
+    hit = _PANCHANG_MONTH_CACHE.get(key)
+    if hit is None:
+        if len(_PANCHANG_MONTH_CACHE) > 6:
+            _PANCHANG_MONTH_CACHE.clear()
+        last = calendar_module.monthrange(year, month)[1]
+        hit = {d: panchang.panchang(datetime.date(year, month, d))
+               for d in range(1, last + 1)}
+        _PANCHANG_MONTH_CACHE[key] = hit
+    return hit
+
+
+def _fit_ellipsis(draw, text, font, max_w):
+    if draw.textlength(text, font=font) <= max_w:
+        return text
+    while text and draw.textlength(text + "…", font=font) > max_w:
+        text = text[:-1]
+    return text + "…" if text else ""
+
+
+def _hindi_calendar_image(today, font_path, cell_w, text_rgba, holiday_rgba,
+                           restricted_rgba, *, show_restricted=True, show_tithi=True,
+                           show_list=True, today_fill_rgba=(255, 255, 255, 235)):
+    """Whole-month wall calendar page for `today`'s month, in Hindi:
+    Devanagari numerals, Sunday-first, a tithi under each date, festivals in
+    Hindi, Vikram Samvat and lunar months in the title. Transparent RGBA."""
+    year, month = today.year, today.month
+    days = _panchang_month(year, month)
+    holidays = HOLIDAYS_BY_YEAR.get(year, {})
+    restricted = {k: v for k, v in RESTRICTED_BY_YEAR.get(year, {}).items()
+                  if k not in holidays} if show_restricted else {}
+
+    cell_h = round(cell_w * 1.18)
+    num_f = _deva_font(font_path, cell_w * 0.36)
+    tithi_f = _deva_font(font_path, cell_w * 0.135)
+    fest_f = _deva_font(font_path, cell_w * 0.12)
+    head_f = _deva_font(font_path, cell_w * 0.14)
+    title_f = _deva_font(font_path, cell_w * 0.42)
+    sub_f = _deva_font(font_path, cell_w * 0.17)
+    list_f = _deva_font(font_path, cell_w * 0.15)
+
+    first_wd = (datetime.date(year, month, 1).weekday() + 1) % 7   # Sunday = 0
+    rows = (first_wd + len(days) + 6) // 7
+    grid_w = cell_w * 7
+    gap = round(cell_w * 0.1)
+
+    # Title: "जनवरी २०२७" + samvat and the lunar months the page spans.
+    first, last = days[1], days[len(days)]
+    spans = []
+    for d in days.values():
+        label = (("अधिक " if d.adhika else "") + panchang.MONTHS[d.month])
+        if label not in spans:
+            spans.append(label)
+    samvats = sorted({d.samvat for d in days.values()})
+    sub = ("विक्रम संवत् " + " / ".join(panchang.devanagari_digits(v) for v in samvats)
+           + "  ·  " + " – ".join(spans))
+    title = f"{panchang.GREGORIAN_MONTHS_HI[month - 1]} {panchang.devanagari_digits(year)}"
+
+    # Festival list under the grid (closed + optional), Hindi, in date order.
+    entries = []
+    for d in range(1, len(days) + 1):
+        if (month, d) in holidays:
+            entries.append((d, panchang.festival_hi(holidays[(month, d)]), holiday_rgba))
+        elif (month, d) in restricted:
+            entries.append((d, panchang.festival_hi(restricted[(month, d)]), restricted_rgba))
+
+    probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    title_h = round(cell_w * 0.55)
+    sub_h = round(cell_w * 0.24)
+    head_h = round(cell_w * 0.26)
+    list_line = round(cell_w * 0.21)
+    per_col = (len(entries) + 1) // 2
+    list_h = (gap + per_col * list_line) if (show_list and entries) else 0
+    total_h = title_h + sub_h + head_h + rows * cell_h + list_h
+    img = Image.new("RGBA", (grid_w, total_h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    draw.text((0, 0), title, font=title_f, fill=text_rgba)
+    draw.text((0, title_h), _fit_ellipsis(probe, sub, sub_f, grid_w), font=sub_f,
+              fill=(*text_rgba[:3], round(text_rgba[3] * 0.75)))
+
+    y0 = title_h + sub_h
+    for i, name in enumerate(panchang.WEEKDAYS_HI_SUN_FIRST):
+        colour = holiday_rgba if i == 0 else (*text_rgba[:3], round(text_rgba[3] * 0.8))
+        tw = draw.textlength(name, font=head_f)
+        draw.text((i * cell_w + (cell_w - tw) / 2, y0), name, font=head_f, fill=colour)
+    y0 += head_h
+
+    dim = (*text_rgba[:3], round(text_rgba[3] * 0.72))
+    prev = panchang.panchang(datetime.date(year, month, 1) - datetime.timedelta(days=1))
+    for dnum, info in days.items():
+        pos = first_wd + dnum - 1
+        col, row = pos % 7, pos // 7
+        x, y = col * cell_w, y0 + row * cell_h
+        is_today = (dnum == today.day)
+        closed = (month, dnum) in holidays
+        optional = (month, dnum) in restricted
+        sunday = (col == 0)
+        if is_today:
+            draw.rounded_rectangle([x + 2, y + 2, x + cell_w - 3, y + cell_h - 3],
+                                   radius=round(cell_w * 0.12), fill=today_fill_rgba)
+        if is_today:
+            ink = _contrast_text(today_fill_rgba[:3])
+            sub_ink = ink
+        elif closed or sunday:
+            ink = sub_ink = holiday_rgba
+        elif optional:
+            ink = sub_ink = restricted_rgba
+        else:
+            ink, sub_ink = text_rgba, dim
+
+        num = panchang.devanagari_digits(dnum)
+        draw.text((x + cell_w * 0.08, y + cell_w * 0.02), num, font=num_f, fill=ink)
+
+        # Moon marker top-right: full = open ring, new = solid disc.
+        r = cell_w * 0.07
+        cx, cy = x + cell_w - cell_w * 0.14, y + cell_w * 0.13
+        if info.tithi == 15:
+            draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=sub_ink, width=max(1, round(cell_w * 0.025)))
+        elif info.tithi == 30:
+            draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=sub_ink)
+
+        ty = y + cell_w * 0.46
+        if show_tithi:
+            text = info.tithi_text
+            if info.tithi not in (15, 30):
+                text = ("शु॰ " if info.paksha == panchang.SHUKLA else "कृ॰ ") + text
+            draw.text((x + cell_w * 0.08, ty), _fit_ellipsis(probe, text, tithi_f, cell_w * 0.88),
+                      font=tithi_f, fill=sub_ink)
+            ty += cell_w * 0.17
+        # The day a (purnimanta) lunar month begins: say which.
+        label = None
+        if closed:
+            label = panchang.festival_hi(holidays[(month, dnum)])
+        elif optional:
+            label = panchang.festival_hi(restricted[(month, dnum)])
+        elif info.sankranti is not None:
+            label = panchang.RASHI_HI[info.sankranti] + " संक्रांति"
+        elif prev is None or (prev.month, prev.adhika) != (info.month, info.adhika):
+            label = ("अधिक " if info.adhika else "") + panchang.MONTHS[info.month]
+        if label:
+            draw.text((x + cell_w * 0.08, ty),
+                      _fit_ellipsis(probe, label, fest_f, cell_w * 0.9),
+                      font=fest_f, fill=ink if (closed or optional) else dim)
+        prev = info
+
+    if show_list and entries:
+        ly = y0 + rows * cell_h + gap
+        col_w = grid_w // 2
+        for n, (d, name, rgba) in enumerate(entries):
+            cx_ = (n // per_col) * col_w
+            cy_ = ly + (n % per_col) * list_line
+            line = f"{panchang.devanagari_digits(d)}  {name}"
+            draw.text((cx_, cy_), _fit_ellipsis(probe, line, list_f, col_w - gap),
+                      font=list_f, fill=rgba)
+    return img
+
+
+def write_hindi_calendar(canvas):
+    """The Hindi (panchang) calendar page, composited where the English
+    calendar widget would sit. Chosen with calendar.style: hindi."""
+    if panchang is None:
+        _warn_hindi_once("module", "panchang.py is missing next to dht_mqtt.py; "
+                                   "Hindi calendar skipped")
+        return
+    settings = load_hindi_calendar_settings()
+    font_path = _resolve_devanagari_font(settings.get("font_family", ""))
+    if font_path is None:
+        _warn_hindi_once("font", "no Devanagari font found (apt install fonts-lohit-deva "
+                                 "or fonts-noto-core); Hindi calendar skipped")
+        return
+
+    def _opacity(key, default):
+        return max(0.0, min(1.0, float(settings.get(key, default))))
+
+    text_rgb = tuple(int(v) for v in settings["text_color"])
+    text_rgba = (*text_rgb, round(255 * _opacity("text_opacity", 0.92)))
+    holiday_rgb = HOLIDAY_PALETTE.get(settings.get("holiday_color", "dull_red"),
+                                      HOLIDAY_PALETTE["dull_red"])
+    restricted_rgb = HOLIDAY_PALETTE.get(settings.get("restricted_color", "amber"),
+                                         HOLIDAY_PALETTE["amber"])
+    today_rgb = tuple(int(v) for v in settings.get("today_fill_color", [255, 255, 255]))
+    cell_w = max(40, min(400, int(settings.get("cell_width", 100))))
+
+    content = _hindi_calendar_image(
+        datetime.date.today(), font_path, cell_w, text_rgba,
+        (*holiday_rgb, 255), (*restricted_rgb, 255),
+        show_restricted=bool(settings.get("show_restricted", True)),
+        show_tithi=bool(settings.get("show_tithi", True)),
+        show_list=bool(settings.get("show_list", True)),
+        today_fill_rgba=(*today_rgb, round(255 * _opacity("today_fill_opacity", 0.92))))
+
+    pad = max(8, round(cell_w * 0.14))
+    widget = _wrap_in_panel(
+        content, pad, tuple(int(v) for v in settings["background_color"]),
+        _opacity("background_opacity", 0.45),
+        border_color=tuple(int(v) for v in settings.get("border_color", [255, 255, 255])),
+        border_width=int(settings.get("border_width", 0)),
+        border_opacity=_opacity("border_opacity", 0.9))
+    x_pct, y_pct = settings["offset_pct"]
+    canvas.alpha_composite(widget, (int(SCREEN_W * float(x_pct) / 100),
+                                    int(SCREEN_H * float(y_pct) / 100)))
 
 
 #: Used only if config.yaml has no "clock" section yet.
