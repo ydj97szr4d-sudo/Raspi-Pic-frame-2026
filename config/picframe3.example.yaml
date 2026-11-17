@@ -606,6 +606,12 @@ calendar:
   # Colour of Sundays, holiday dates and the holiday list below the grid —
   # picked from a fixed palette rather than mixed by hand.
   holiday_color: dull_red
+  # Also show the optional (restricted) holidays: their dates in the grid
+  # and a line for each below it. Off shows only the closed holidays.
+  show_restricted: true
+  # Colour of the optional (restricted) holidays, from the same palette as
+  # the holiday colour. Keep it different so the two kinds read apart.
+  restricted_color: amber
   # A font from the library for this widget alone, instead of the frame-wide
   # font. Empty inherits it.
   font_family: ''

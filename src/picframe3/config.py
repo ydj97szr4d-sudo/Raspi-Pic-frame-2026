@@ -618,6 +618,12 @@ class CalendarConfig:
     #: A plain dropdown rather than a 3-number RGB field, so it reads as a
     #: palette swatch pick rather than a colour-mixing exercise.
     holiday_color: str = "dull_red"
+    #: Whether the optional ("restricted") holidays are shown at all: their
+    #: dates in the grid and their lines in the list below it.
+    show_restricted: bool = True
+    #: Colour of those optional holidays, from the same palette as
+    #: holiday_color -- different by default, so the two kinds read apart.
+    restricted_color: str = "amber"
     #: A library font name (media.fontlib.CHOICES) for this widget alone,
     #: instead of the frame-wide viewer.font. "" (default) inherits it.
     font_family: str = ""

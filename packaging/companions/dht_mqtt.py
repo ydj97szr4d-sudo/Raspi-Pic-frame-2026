@@ -223,6 +223,8 @@ DEFAULT_CALENDAR_SETTINGS = {
     "background_color": [0, 0, 0],
     "background_opacity": 0.35,
     "holiday_color": "dull_red",
+    "show_restricted": True,
+    "restricted_color": "amber",
     "font_family": "",
     "border_color": [255, 255, 255],
     "border_width": 0,
@@ -310,6 +312,46 @@ HOLIDAYS_BY_YEAR = {
     },
 }
 
+#: Optional ("Restricted", RH) holidays -- the second column on the Army
+#: Postal Corps calendar. Same shape as HOLIDAYS_BY_YEAR, drawn in
+#: calendar.restricted_color so they read apart from the closed ones. One
+#: name per date, so dates the calendar prints twice (14 Jan, 14 Apr) are
+#: merged, and a few names are shortened to what a small widget can hold.
+RESTRICTED_BY_YEAR = {
+    2027: {
+        (1, 1): "New Year's Day",
+        (1, 14): "Makar Sankranti / Pongal / Guru Gobind Singh's Birthday",
+        (2, 11): "Basant Panchami",
+        (2, 19): "Shivaji Jayanti",
+        (2, 20): "Guru Ravidas's Birthday",
+        (3, 2): "Dayananda Saraswati's Birthday",
+        (3, 5): "Jamat-Ul-Vida",
+        (3, 6): "Maha Shivratri",
+        (3, 22): "Holika Dahan / Dolyatra",
+        (3, 28): "Easter Sunday",
+        (4, 7): "Gudi Padava / Ugadi / 1st Navratra",
+        (4, 14): "Vaisakhi / Vishu / Bahag Bihu",
+        (5, 19): "Rabindranath Tagore's Birthday",
+        (7, 5): "Rath Yatra",
+        (8, 15): "Parsi New Year / Navroz",
+        (8, 17): "Raksha Bandhan",
+        (9, 4): "Ganesh Chaturthi",
+        (9, 12): "Onam",
+        (10, 6): "Dussehra (Saptami)",
+        (10, 7): "Dussehra (Mahashtami)",
+        (10, 8): "Dussehra (Mahanavami)",
+        (10, 15): "Valmiki's Birthday",
+        (10, 18): "Karwa Chauth",
+        (10, 28): "Naraka Chaturdashi",
+        (10, 30): "Govardhan Puja",
+        (10, 31): "Bhai Duj",
+        (11, 4): "Chhat Puja",
+        (11, 24): "Guru Teg Bahadur's Martyrdom Day",
+        (12, 12): "Hazrat Ali's Birthday",
+        (12, 24): "Christmas Eve",
+    },
+}
+
 #: The palette calendar.holiday_color picks from (web Settings page,
 #: section "Calendar", "Holiday colour") -- a dropdown of named swatches
 #: rather than a 3-number RGB field, so it reads as "pick a colour" rather
@@ -372,7 +414,8 @@ def _calendar_widget_image(today, font_path, size, grid_size, grid_row_gap,
                            grid_align_h="center", grid_align_v="center",
                            today_fill_color=None, today_fill_opacity=0.92,
                            today_border_color=None, today_border_width=0,
-                           today_border_opacity=0.9, holiday_align="L"):
+                           today_border_opacity=0.9, holiday_align="L",
+                           restricted_color=None, show_restricted=True):
     """Today's date/day-name, and a small month grid below it with today
     highlighted. One RGBA image, sized to its own content -- the caller
     places it, so this knows nothing about screen position or the
@@ -430,8 +473,19 @@ def _calendar_widget_image(today, font_path, size, grid_size, grid_row_gap,
     today_number_rgba = _contrast_text(today_fill_color)
 
     holidays = HOLIDAYS_BY_YEAR.get(today.year, {})
+    # Optional holidays only count on a date that is not already a closed
+    # one -- the closed name wins, and the date keeps the closed colour.
+    restricted = {k: v for k, v in RESTRICTED_BY_YEAR.get(today.year, {}).items()
+                  if show_restricted and k not in holidays}
+    restricted_color = restricted_color if restricted_color is not None else (209, 155, 40)
+    restricted_rgba = (*restricted_color, text_alpha)
+    # (day, name, colour) for the month, in date order, closed and optional
+    # interleaved -- the colour is what tells them apart.
     this_month_holidays = sorted(
-        (day, name) for (month, day), name in holidays.items() if month == today.month)
+        [(day, name, holiday_rgba) for (month, day), name in holidays.items()
+         if month == today.month]
+        + [(day, name, restricted_rgba) for (month, day), name in restricted.items()
+           if month == today.month])
 
     probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
     date_line = today.strftime("%A, %-d %B")
@@ -463,25 +517,53 @@ def _calendar_widget_image(today, font_path, size, grid_size, grid_row_gap,
     # Two adjacent entries share one line, separated by " | ", whenever
     # they both fit within the panel's base width (the date line / grid's
     # own width, before any holiday text is considered) -- otherwise the
-    # second one starts a fresh line of its own.
-    holiday_entries = [f"{day}: {name}" for day, name in this_month_holidays]
+    # second one starts a fresh line of its own. An entry too long for a
+    # line by itself (some optional holidays carry three names) wraps at
+    # spaces to that same base width rather than stretching the panel.
+    # Each line is a list of (text, colour) pieces, because one line can
+    # hold a closed and an optional holiday, which are drawn in different
+    # colours.
     base_width = max(date_w, grid_w_natural)
-    holiday_lines = []
+    separator = "   |   "
+
+    def _text_w(text):
+        return int(probe.textlength(text, font=grid_font))
+
+    def _wrap_entry(text):
+        rows, current = [], ""
+        for word in text.split(" "):
+            trial = f"{current} {word}" if current else word
+            if current and _text_w(trial) > base_width:
+                rows.append(current)
+                current = word
+            else:
+                current = trial
+        rows.append(current)
+        return rows
+
+    entries = [(f"{day}: {name}", colour) for day, name, colour in this_month_holidays]
+    holiday_lines = []        # each: [(text, rgba), ...]
     i = 0
-    while i < len(holiday_entries):
-        first = holiday_entries[i]
-        if i + 1 < len(holiday_entries):
-            combined = f"{first}   |   {holiday_entries[i + 1]}"
-            if int(probe.textlength(combined, font=grid_font)) <= base_width:
-                holiday_lines.append(combined)
+    while i < len(entries):
+        text, colour = entries[i]
+        if _text_w(text) > base_width:
+            for row in _wrap_entry(text):
+                holiday_lines.append([(row, colour)])
+            i += 1
+            continue
+        if i + 1 < len(entries):
+            nxt, nxt_colour = entries[i + 1]
+            if _text_w(text + separator + nxt) <= base_width:
+                holiday_lines.append([(text, colour), (separator, header_rgba),
+                                      (nxt, nxt_colour)])
                 i += 2
                 continue
-        holiday_lines.append(first)
+        holiday_lines.append([(text, colour)])
         i += 1
     holiday_line_h = sum(grid_font.getmetrics())
     holiday_gap_y = round(grid_size * 0.4) if holiday_lines else 0
     holiday_block_h = holiday_gap_y + holiday_line_h * len(holiday_lines)
-    holiday_widths = [int(probe.textlength(line, font=grid_font)) for line in holiday_lines]
+    holiday_widths = [sum(_text_w(t) for t, _ in line) for line in holiday_lines]
 
     width = max(date_w, grid_w_natural, *holiday_widths) if holiday_widths \
         else max(date_w, grid_w_natural)
@@ -578,6 +660,8 @@ def _calendar_widget_image(today, font_path, size, grid_size, grid_row_gap,
                 day_rgba = today_number_rgba
             elif is_sunday or is_holiday:
                 day_rgba = holiday_rgba
+            elif (today.month, day) in restricted:
+                day_rgba = restricted_rgba
             else:
                 day_rgba = text_rgba
             draw.text((tx, ty), label, font=grid_font, fill=day_rgba)
@@ -593,7 +677,9 @@ def _calendar_widget_image(today, font_path, size, grid_size, grid_row_gap,
             lx = width - lw
         else:
             lx = 0
-        draw.text((lx, ly), line, font=grid_font, fill=holiday_rgba)
+        for text, colour in line:
+            draw.text((lx, ly), text, font=grid_font, fill=colour)
+            lx += _text_w(text)
 
     return img
 
@@ -717,6 +803,9 @@ def write_calendar(canvas):
     today_border_width = int(settings.get("today_border_width", 0))
     today_border_opacity = max(0.0, min(1.0, float(settings.get("today_border_opacity", 0.9))))
     holiday_align = settings.get("holiday_align", "L")
+    restricted_color = HOLIDAY_PALETTE.get(settings.get("restricted_color", "amber"),
+                                           HOLIDAY_PALETTE["amber"])
+    show_restricted = bool(settings.get("show_restricted", True))
 
     content = _calendar_widget_image(
         datetime.date.today(), font_path, size, grid_size, grid_row_gap, square_padding,
@@ -725,7 +814,8 @@ def write_calendar(canvas):
         grid_align_h=grid_align_h, grid_align_v=grid_align_v,
         today_fill_color=today_fill_color, today_fill_opacity=today_fill_opacity,
         today_border_color=today_border_color, today_border_width=today_border_width,
-        today_border_opacity=today_border_opacity, holiday_align=holiday_align)
+        today_border_opacity=today_border_opacity, holiday_align=holiday_align,
+        restricted_color=restricted_color, show_restricted=show_restricted)
 
     pad = max(6, round(size * _PANEL_PAD_FRAC))
     widget = _wrap_in_panel(content, pad, bg_color, bg_opacity,

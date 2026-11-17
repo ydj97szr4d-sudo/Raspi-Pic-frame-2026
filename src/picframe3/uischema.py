@@ -275,6 +275,8 @@ NOTES = {
     "calendar.background_color": "Red, green, blue, 0–255. The panel drawn behind the whole widget, so the text stays legible over a busy photograph.",
     "calendar.background_opacity": "0 (no panel at all — text floats directly over the picture) – 1 (solid panel).",
     "calendar.holiday_color": "Colour of Sundays, holiday dates and the holiday list below the grid — picked from a fixed palette rather than mixed by hand.",
+    "calendar.show_restricted": "Also show the optional (restricted) holidays: their dates in the grid and a line for each below it. Off shows only the closed holidays.",
+    "calendar.restricted_color": "Colour of the optional (restricted) holidays, from the same palette as the holiday colour. Keep it different so the two kinds read apart.",
     "calendar.font_family": "A font from the library for this widget alone, instead of the frame-wide font. Empty inherits it.",
     "calendar.border_color": "Red, green, blue, 0–255. A stroked outline around the whole widget's panel.",
     "calendar.border_width": "Outline thickness in pixels. 0 (default) draws no outline.",
@@ -426,6 +428,8 @@ LABELS = {
     "calendar.background_color": "Background colour",
     "calendar.background_opacity": "Background opacity",
     "calendar.holiday_color": "Holiday colour",
+    "calendar.show_restricted": "Show optional holidays",
+    "calendar.restricted_color": "Optional holiday colour",
     "calendar.font_family": "Font",
     "calendar.border_color": "Outline colour",
     "calendar.border_width": "Outline width (px)",
@@ -763,6 +767,10 @@ CHOICES: dict[str, list[str]] = {
     # Keep in lock-step with HOLIDAY_PALETTE in packaging/companions/dht_mqtt.py
     # -- that's the only place the actual RGB values live.
     "calendar.holiday_color": [
+        "dull_red", "crimson", "orange", "amber", "olive", "forest_green",
+        "teal", "sky_blue", "indigo", "violet", "magenta", "slate_grey", "white",
+    ],
+    "calendar.restricted_color": [
         "dull_red", "crimson", "orange", "amber", "olive", "forest_green",
         "teal", "sky_blue", "indigo", "violet", "magenta", "slate_grey", "white",
     ],
@@ -1376,7 +1384,8 @@ JOBS = [
                 "calendar.square_padding",
                 "calendar.text_color", "calendar.text_opacity",
                 "calendar.background_color", "calendar.background_opacity",
-                "calendar.holiday_color", "calendar.holiday_align", "calendar.font_family",
+                "calendar.holiday_color", "calendar.show_restricted", "calendar.restricted_color",
+                "calendar.holiday_align", "calendar.font_family",
                 "calendar.border_color", "calendar.border_width", "calendar.border_opacity",
                 "calendar.divider_width", "calendar.divider_color", "calendar.divider_opacity",
                 "calendar.grid_align_h", "calendar.grid_align_v",

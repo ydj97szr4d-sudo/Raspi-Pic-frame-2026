@@ -332,6 +332,8 @@ The upper-left calendar widget: today's date and a small month grid.
 | `background_color` | list of integers | `[0, 0, 0]` | Red, green, blue, 0–255. The panel drawn behind the whole widget, so the text stays legible over a busy photograph. |
 | `background_opacity` | number | `0.35` | 0 (no panel at all — text floats directly over the picture) – 1 (solid panel). |
 | `holiday_color` | string | `'dull_red'` | Colour of Sundays, holiday dates and the holiday list below the grid — picked from a fixed palette rather than mixed by hand. |
+| `show_restricted` | boolean | `True` | Also show the optional (restricted) holidays: their dates in the grid and a line for each below it. Off shows only the closed holidays. |
+| `restricted_color` | string | `'amber'` | Colour of the optional (restricted) holidays, from the same palette as the holiday colour. Keep it different so the two kinds read apart. |
 | `font_family` | string | *(empty)* | A font from the library for this widget alone, instead of the frame-wide font. Empty inherits it. |
 | `border_color` | list of integers | `[255, 255, 255]` | Red, green, blue, 0–255. A stroked outline around the whole widget's panel. |
 | `border_width` | integer | `0` | Outline thickness in pixels. 0 (default) draws no outline. |
