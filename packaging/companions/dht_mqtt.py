@@ -284,6 +284,30 @@ HOLIDAYS_BY_YEAR = {
         (11, 24): "Guru Nanak's Birthday",
         (12, 25): "Christmas Day",
     },
+    # 2027: the Central Government's gazetted list for Delhi / New Delhi
+    # (DoPT order dated 16 July 2026), read from two reproductions of it, not
+    # the order itself -- worth a glance against the Army Postal Service
+    # Corps calendar when that is out. Independence Day and Milad-un-Nabi
+    # both fall on 15 Aug, and this table holds one name per date, so they
+    # share an entry.
+    2027: {
+        (1, 26): "Republic Day",
+        (3, 10): "Id-ul-Fitr",
+        (3, 23): "Holi",
+        (3, 26): "Good Friday",
+        (4, 15): "Ram Navami",
+        (4, 19): "Mahavir Jayanti",
+        (5, 17): "Id-ul-Zuha (Bakrid)",
+        (5, 20): "Buddha Purnima",
+        (6, 16): "Muharram",
+        (8, 15): "Independence Day / Milad-un-Nabi",
+        (8, 25): "Janmashtami",
+        (10, 2): "Gandhi Jayanti",
+        (10, 9): "Dussehra",
+        (10, 29): "Diwali",
+        (11, 14): "Guru Nanak's Birthday",
+        (12, 25): "Christmas Day",
+    },
 }
 
 #: The palette calendar.holiday_color picks from (web Settings page,
