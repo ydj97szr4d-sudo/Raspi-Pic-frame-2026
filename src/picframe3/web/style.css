@@ -808,7 +808,7 @@ label.inline input { width: auto; accent-color: var(--accent); }
 .face-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-top: 6px; }
 .face-opt { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 5px; border-radius: 10px;
   border: 2px solid transparent; background: rgba(127, 127, 127, 0.10); cursor: pointer; font-size: 12px; text-align: center; }
-.face-opt img { width: 100%; height: auto; aspect-ratio: 3 / 2; border-radius: 6px; display: block; background: #000; }
+.face-opt img { width: 100%; height: auto; aspect-ratio: 1 / 1; object-fit: contain; border-radius: 6px; display: block; background: rgba(0,0,0,0.35); }
 .face-opt input { position: absolute; opacity: 0; pointer-events: none; }
 .face-opt.on { border-color: var(--accent); background: rgba(127, 127, 127, 0.22); }
 .face-opt:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }

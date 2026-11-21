@@ -1484,7 +1484,6 @@ DEFAULT_FACETILE_SETTINGS = {
     "offset_pct": [3.0, 3.0],
     "size": 420,
     "format_24h": False,
-    "show_date": True,
     "custom_colors": False,
     "text_color": [232, 234, 237],
     "accent_color": [255, 149, 0],
@@ -1504,7 +1503,6 @@ DEFAULT_FACETILE_SETTINGS = {
     "banner_size": 100,
     "banner_color": [214, 170, 72],
 }
-FACE_ASPECT = 2 / 3   # tile height / width -- the 480 x 320 the faces are designed on
 
 
 def load_facetile_settings():
@@ -1524,9 +1522,9 @@ def facetile_image(settings, now):
     width, rounded corners, see-through as asked, with the optional outline. Pure (no globals
     but the renderer), so it can be previewed without the frame."""
     w = max(120, int(settings["size"]))
-    h = int(round(w * FACE_ASPECT))
+    h = int(round(w * faces.aspect(settings["face"])))
     opts = {
-        "clock_24h": bool(settings["format_24h"]), "show_date": bool(settings["show_date"]),
+        "clock_24h": bool(settings["format_24h"]),
         "brightness": int(settings["brightness"]),
         "analog_thickness": int(settings["analog_thickness"]),
         "analog_markings": settings["analog_markings"],

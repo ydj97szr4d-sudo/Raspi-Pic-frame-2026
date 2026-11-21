@@ -453,9 +453,8 @@ A clock-face tile -- the same faces as the Acton screen, each adjustable on its 
 | `face` | string | `'dark'` | Which clock face. The settings page shows them as thumbnails; the faces are the same ones the Acton screen has. |
 | `position` | string | `'BR'` | Which corner it's inset from. |
 | `offset_pct` | list of numbers | `[3.0, 3.0]` | Inset from that corner, percent of screen width/height — [x, y]. |
-| `size` | integer | `420` | Width of the tile in real screen pixels; the height follows at 3:2. |
+| `size` | integer | `420` | Width of the tile in real screen pixels; the height follows (square, or 3:2 for Banner). |
 | `format_24h` | boolean | `False` | On shows 24-hour time on the dial text; off shows 12-hour. |
-| `show_date` | boolean | `True` | Show the date beside the dial (and in the Banner's bottom strip). |
 | `custom_colors` | boolean | `False` | On uses the colours below instead of the face's own palette; off leaves each face looking as designed. |
 | `text_color` | list of integers | `[232, 234, 237]` | Red, green, blue, 0–255. Text, numerals and hands. Only used with Use my colours. |
 | `accent_color` | list of integers | `[255, 149, 0]` | Red, green, blue, 0–255. Seconds hand and highlights. Only used with Use my colours. |

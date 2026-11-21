@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(ROOT, "packaging", "companions"))
 import faces  # noqa: E402
 
 OUT = os.path.join(ROOT, "src", "picframe3", "web", "faces")
-W, H = 480, 320          # the design size the faces are laid out for; stored at 2/3 for the page
+W, H = 480, 480          # square dials; Banner is 3:2 (below)
 
 
 def main() -> None:
@@ -25,8 +25,9 @@ def main() -> None:
     from PIL import Image
 
     for fid in faces.FACES:
-        img = faces.render_face(fid, W, H, now)
-        img = img.resize((W * 2 // 3, H * 2 // 3), Image.LANCZOS)
+        h = int(W * faces.aspect(fid))
+        img = faces.render_face(fid, W, h, now)
+        img = img.resize((W * 2 // 3, h * 2 // 3), Image.LANCZOS)
         img.save(os.path.join(OUT, fid + ".png"), optimize=True)
         print("wrote", fid)
 

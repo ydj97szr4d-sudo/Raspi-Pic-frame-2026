@@ -24,7 +24,7 @@ def test_the_menu_matches_the_renderer():
 
 @pytest.mark.parametrize("face_id", FACE_IDS)
 def test_every_face_draws_at_any_size(face_id):
-    for w, h in ((480, 320), (240, 160), (900, 600)):
+    for w, h in ((480, 320), (240, 240), (600, 600)):
         img = faces.render_face(face_id, w, h, NOW)
         assert img.size == (w, h)
         assert img.getbbox()

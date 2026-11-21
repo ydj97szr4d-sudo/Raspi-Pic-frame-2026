@@ -29,7 +29,7 @@ CFG = {
     "style": "flat", "clock_24h": False, "show_seconds": False, "face": "analog", "dial": "analog",
     "mono": False, "weekday": None, "font_family": "sans", "clock_font": "sans",
     "bg": [8, 10, 16], "bg2": [26, 30, 52], "fg": [232, 234, 237], "accent": [29, 185, 84],
-    "weather_blue": [120, 180, 255], "brightness": 100, "show_date": True, "show_weather": False,
+    "weather_blue": [120, 180, 255], "brightness": 100, "show_date": False, "show_weather": False,
     "analog_thickness": 100, "analog_markings": "full", "analog_numerals": True,
     "banner_text": "Welcome Home", "banner_font": "auto", "banner_size": 100, "banner_color": [214, 170, 72],
     "units": "C",
@@ -408,6 +408,8 @@ def render_analog(img, dr, w, h, now, playing, glass):
     R = int(h * 0.38)
     fr = int(R * 1.16)
     cx = fr + int(w * 0.012); cy = h // 2
+    if not CFG.get("show_date") and not CFG.get("show_weather"):
+        cx = w // 2                      # nothing beside the dial (the frame has its own calendar and weather)
     dial = CFG.get("dial") or "analog"
     if not dial.startswith("legacy:") and dial != "rugged":    # softly rounded square frame
         dr.rounded_rectangle([cx - fr, cy - fr, cx + fr, cy + fr], radius=int(fr * 0.22),
@@ -759,14 +761,11 @@ def render_banner(w, h, now):
     bh = h - top_h
     tstr, ampm = clock_strings(now)
     left = ("%s %s" % (tstr, ampm)).strip()
-    right = now.strftime("%a %d %b") if CFG.get("show_date") else ""
     f2 = font(int(bh * 0.46), True)
     pad = int(w * 0.04)
     y = top_h + (bh - tw_(dr, "0", f2)[1]) // 2 - 4
-    dr.text((pad, y), left, fill=fg, font=f2)
-    if right:
-        rw = tw_(dr, right, f2)[0]
-        dr.text((w - pad - rw, y), right, fill=mix(col("bg"), fg, 0.7), font=f2)
+    lw = tw_(dr, left, f2)[0]
+    dr.text(((w - lw) // 2, y), left, fill=fg, font=f2)
     return img
 
 
@@ -788,9 +787,16 @@ def _render(w, h, now):
     return render_analog(img, ImageDraw.Draw(img), w, h, now, None, glass)
 
 
-_OPT_KEYS = ("clock_24h", "show_seconds", "show_date", "style", "bg", "bg2", "fg", "accent",
+_OPT_KEYS = ("clock_24h", "show_seconds", "style", "bg", "bg2", "fg", "accent",
              "analog_thickness", "analog_markings", "analog_numerals", "brightness",
              "banner_text", "banner_font", "banner_size", "banner_color")
+
+
+ASPECT = {"banner": 2 / 3}   # tile height / width; every other face is a square dial
+
+
+def aspect(face_id):
+    return ASPECT.get(face_id, 1.0)
 
 
 def render_face(face_id, w, h, now=None, opts=None):

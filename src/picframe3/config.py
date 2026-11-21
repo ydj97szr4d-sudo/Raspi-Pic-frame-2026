@@ -827,7 +827,7 @@ class StatusConfig:
 
 @dataclass
 class FaceTileConfig:
-    """A clock-face tile drawn by ``dht_mqtt.py`` onto the same overlay image:
+    """A clock-face tile (time only -- the frame has its own calendar and weather) drawn by ``dht_mqtt.py`` onto the same overlay image:
     the same faces the JBLPie's Acton screen shows (Dark, Light, Digital,
     Banner, Paper, Glass, Rugged, Night ... twenty in all), drawn at any size,
     with the same translucent-tile, outline and font controls as the other
@@ -845,12 +845,10 @@ class FaceTileConfig:
     position: str = "BR"
     #: Inset from that corner, percent of screen width/height -- [x, y].
     offset_pct: list[float] = field(default_factory=lambda: [3.0, 3.0])
-    #: Width of the tile in real screen pixels; the height follows (3 : 2).
+    #: Width of the tile in real screen pixels; the height follows (square, or 3 : 2 for Banner).
     size: int = 420
     #: 24-hour dial text / digits when on, 12-hour when off.
     format_24h: bool = False
-    #: Show the date beside the dial (and in the Banner's bottom strip).
-    show_date: bool = True
     #: On: use the colours below instead of the face's own palette.
     custom_colors: bool = False
     #: Red, green, blue, 0-255. Text, numerals and hands. Only with custom_colors.

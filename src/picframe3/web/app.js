@@ -2347,7 +2347,7 @@ function faceGrid(f) {
       `<input type="radio" name="face-${escapeHtml(f.key)}" value="${escapeHtml(o.id)}"` +
       `${o.id === current ? " checked" : ""}>` +
       `<img src="faces/${encodeURIComponent(o.id)}.png" alt="" loading="lazy" ` +
-      `width="160" height="107"><span>${escapeHtml(o.label)}</span></label>`).join("") +
+      `width="160" height="160"><span>${escapeHtml(o.label)}</span></label>`).join("") +
     `</div>`;
 }
 

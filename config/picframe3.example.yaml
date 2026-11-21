@@ -793,9 +793,10 @@ facetile:
   face: dark
   position: BR            # Which corner it's inset from.
   offset_pct: [3.0, 3.0]  # Inset from that corner, percent of screen width/height — [x, y].
-  size: 420               # Width of the tile in real screen pixels; the height follows at 3:2.
+  # Width of the tile in real screen pixels; the height follows (square, or
+  # 3:2 for Banner).
+  size: 420
   format_24h: false       # On shows 24-hour time on the dial text; off shows 12-hour.
-  show_date: true         # Show the date beside the dial (and in the Banner's bottom strip).
   # On uses the colours below instead of the face's own palette; off leaves
   # each face looking as designed.
   custom_colors: false
