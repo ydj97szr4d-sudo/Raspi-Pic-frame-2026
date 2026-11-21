@@ -109,7 +109,7 @@ async function liveTick() {
   if (!liveOn || document.hidden) return;
   try {
     await captureScreen();
-    $("#live-badge").textContent = "live";
+    $("#live-badge").textContent = "live screen";
   } catch (err) {
     $("#live-badge").textContent = "live screen · waiting";   // busy or briefly unreachable; try again
   }
