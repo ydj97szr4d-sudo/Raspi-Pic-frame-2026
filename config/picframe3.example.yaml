@@ -784,6 +784,52 @@ nowplaying:
   border_width: 0         # Outline thickness in pixels. 0 (default) draws no outline.
   border_opacity: 0.9     # 0–1. Only matters when border_width > 0.
 
+# A clock-face tile -- the same faces as the Acton screen, each adjustable
+# on its own.
+facetile:
+  enabled: false          # Off removes the tile entirely.
+  # Which clock face. The settings page shows them as thumbnails; the faces
+  # are the same ones the Acton screen has.
+  face: dark
+  position: BR            # Which corner it's inset from.
+  offset_pct: [3.0, 3.0]  # Inset from that corner, percent of screen width/height — [x, y].
+  size: 420               # Width of the tile in real screen pixels; the height follows at 3:2.
+  format_24h: false       # On shows 24-hour time on the dial text; off shows 12-hour.
+  show_date: true         # Show the date beside the dial (and in the Banner's bottom strip).
+  # On uses the colours below instead of the face's own palette; off leaves
+  # each face looking as designed.
+  custom_colors: false
+  # Red, green, blue, 0–255. Text, numerals and hands. Only used with Use my
+  # colours.
+  text_color: [232, 234, 237]
+  # Red, green, blue, 0–255. Seconds hand and highlights. Only used with Use
+  # my colours.
+  accent_color: [255, 149, 0]
+  # Red, green, blue, 0–255. The tile's own background. Only used with Use
+  # my colours.
+  background_color: [0, 0, 0]
+  background_opacity: 1.0 # 0–1. How see-through the whole tile is; 1 is solid.
+  brightness: 100         # Dims the face, in percent. 100 is as designed.
+  corner_radius_pct: 6.0  # Rounded corners, as a percent of the tile's height. 0 is square.
+  # A font from the library for this tile's text, instead of the face's own.
+  # Empty keeps the face's font.
+  font_family: ''
+  # Red, green, blue, 0–255. A stroked outline around the tile.
+  border_color: [255, 255, 255]
+  border_width: 0         # Outline thickness in pixels. 0 (default) draws no outline.
+  border_opacity: 0.9     # 0–1. Only matters when border_width > 0.
+  analog_thickness: 100   # Hand weight on the analogue dials, in percent.
+  analog_markings: full   # Tick marks on the analogue dials.
+  analog_numerals: true   # Show 12, 3, 6 and 9 on the analogue dials.
+  # The Banner face's lettering. A new line makes a new line of text.
+  banner_text: Welcome Home
+  # Banner lettering font: auto picks Amplify if installed, otherwise a
+  # cursive; or type any installed font family.
+  banner_font: auto
+  banner_size: 100        # Banner lettering size, in percent of the largest that fits.
+  # Red, green, blue, 0–255. The Banner lettering's gold.
+  banner_color: [214, 170, 72]
+
 # The small animated maker's mark in a corner of the screen.
 brand:
   enabled: true           # Off removes the mark entirely. (restart)

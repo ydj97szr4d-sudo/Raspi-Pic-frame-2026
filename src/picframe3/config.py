@@ -826,6 +826,71 @@ class StatusConfig:
 
 
 @dataclass
+class FaceTileConfig:
+    """A clock-face tile drawn by ``dht_mqtt.py`` onto the same overlay image:
+    the same faces the JBLPie's Acton screen shows (Dark, Light, Digital,
+    Banner, Paper, Glass, Rugged, Night ... twenty in all), drawn at any size,
+    with the same translucent-tile, outline and font controls as the other
+    widgets. Every setting here belongs to the frame alone -- changing the
+    face or colours here never touches the Pi, and vice versa. No weather is
+    drawn; the frame has its own weather widgets. Turn off viewer.show_clock
+    and clock.enabled if you use this, so the clocks don't double up.
+    """
+
+    #: Off removes the tile entirely; nothing is drawn or measured.
+    enabled: bool = False
+    #: Which face (see gfx/facelist.py; the web page shows them as thumbnails).
+    face: str = "dark"
+    #: Which corner it's inset from: TL TC TR BL BC BR.
+    position: str = "BR"
+    #: Inset from that corner, percent of screen width/height -- [x, y].
+    offset_pct: list[float] = field(default_factory=lambda: [3.0, 3.0])
+    #: Width of the tile in real screen pixels; the height follows (3 : 2).
+    size: int = 420
+    #: 24-hour dial text / digits when on, 12-hour when off.
+    format_24h: bool = False
+    #: Show the date beside the dial (and in the Banner's bottom strip).
+    show_date: bool = True
+    #: On: use the colours below instead of the face's own palette.
+    custom_colors: bool = False
+    #: Red, green, blue, 0-255. Text, numerals and hands. Only with custom_colors.
+    text_color: list[int] = field(default_factory=lambda: [232, 234, 237])
+    #: Red, green, blue, 0-255. The accent (seconds hand, highlights). Only with custom_colors.
+    accent_color: list[int] = field(default_factory=lambda: [255, 149, 0])
+    #: Red, green, blue, 0-255. The tile's own background. Only with custom_colors.
+    background_color: list[int] = field(default_factory=lambda: [0, 0, 0])
+    #: 0 (invisible) - 1 (fully opaque). How see-through the whole tile is.
+    background_opacity: float = 1.0
+    #: Dims the face, percent. 100 = as designed.
+    brightness: int = 100
+    #: Rounded corners, percent of the tile's height.
+    corner_radius_pct: float = 6.0
+    #: A library font name (media.fontlib.CHOICES) for this widget's text
+    #: alone. "" (default) keeps the face's own font.
+    font_family: str = ""
+    #: Red, green, blue, 0-255. A stroked outline around the tile.
+    border_color: list[int] = field(default_factory=lambda: [255, 255, 255])
+    #: Outline thickness in pixels. 0 (default) draws no outline.
+    border_width: int = 0
+    #: 0 (invisible) - 1 (fully opaque). Only matters when border_width > 0.
+    border_opacity: float = 0.9
+    #: Hand weight on the analogue dials, percent.
+    analog_thickness: int = 100
+    #: Tick marks on the analogue dials: full, hours, minimal or none.
+    analog_markings: str = "full"
+    #: Show 12 / 3 / 6 / 9 on the analogue dials.
+    analog_numerals: bool = True
+    #: The Banner face's lettering. A new line is a new line of text.
+    banner_text: str = "Welcome Home"
+    #: Banner lettering font: "auto" = Amplify if installed, else a cursive; or any installed family name.
+    banner_font: str = "auto"
+    #: Banner lettering size, percent of the largest that fits.
+    banner_size: int = 100
+    #: Red, green, blue, 0-255. The Banner lettering's gold.
+    banner_color: list[int] = field(default_factory=lambda: [214, 170, 72])
+
+
+@dataclass
 class NowPlayingConfig:
     """The "Now playing" tile drawn by ``dht_mqtt.py`` onto the same overlay
     image: cover art, title, artist and album of whatever Music Assistant is
@@ -930,6 +995,7 @@ class Config:
     clock: ClockConfig = field(default_factory=ClockConfig)
     status: StatusConfig = field(default_factory=StatusConfig)
     nowplaying: NowPlayingConfig = field(default_factory=NowPlayingConfig)
+    facetile: FaceTileConfig = field(default_factory=FaceTileConfig)
     brand: BrandConfig = field(default_factory=BrandConfig)
 
     #: Where this config was loaded from, for ``save()``.

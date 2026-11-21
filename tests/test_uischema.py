@@ -47,7 +47,7 @@ def test_every_section_is_introduced(built):
 
 def test_every_control_can_be_drawn(built):
     known = {"bool", "int", "number", "text", "secret", "select", "datalist",
-             "csv", "numbers", "json", "pick", "pick-string", "tiers"}
+             "csv", "numbers", "json", "pick", "pick-string", "tiers", "faces"}
     for section in built["sections"]:
         for f in section["fields"]:
             assert f["kind"] in known, f

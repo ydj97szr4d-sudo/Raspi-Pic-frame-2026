@@ -20,6 +20,7 @@ from collections.abc import Sequence
 from dataclasses import MISSING, fields, is_dataclass
 from typing import Any, get_args, get_origin
 
+from .gfx.facelist import FACE_IDS, FACE_LABELS
 from .media import fontlib
 
 # --------------------------------------------------------------------------
@@ -54,6 +55,8 @@ SECTION_PROSE = {
                       "calendar when the Calendar style is Hindi.",
     "clock": "A custom-drawn clock with its own translucent panel.",
     "status": "A small status strip -- outdoor sensor link, and more to come.",
+    "facetile": "A clock-face tile -- the same faces as the Acton screen, "
+                "each adjustable on its own.",
     "nowplaying": "A tile with the cover art and track of whatever Music "
                   "Assistant is playing; shown only while music plays.",
     "brand": "The small animated maker's mark in a corner of the screen.",
@@ -82,6 +85,7 @@ SECTION_LABELS = {
     "clock": "Clock widget",
     "status": "Status strip",
     "nowplaying": "Now playing tile",
+    "facetile": "Clock face tile",
     "brand": "Brand mark",
     "appearance": "Appearance",
 }
@@ -334,6 +338,31 @@ NOTES = {
     "clock.border_opacity": "0–1. Only matters when border_width > 0.",
     "clock.align": "Left, centre or right justification of the time text within its own panel. Only visible once min_width_pct stretches the panel beyond the text's own width.",
     "clock.min_width_pct": "Stretches the panel to at least this percent of the screen's width when the time text is narrower. 0 leaves it hugging the text.",
+    "facetile.enabled": 'Off removes the tile entirely.',
+    "facetile.face": 'Which clock face. The settings page shows them as thumbnails; the faces are the same ones the Acton screen has.',
+    "facetile.position": "Which corner it's inset from.",
+    "facetile.offset_pct": 'Inset from that corner, percent of screen width/height — [x, y].',
+    "facetile.size": 'Width of the tile in real screen pixels; the height follows at 3:2.',
+    "facetile.format_24h": 'On shows 24-hour time on the dial text; off shows 12-hour.',
+    "facetile.show_date": "Show the date beside the dial (and in the Banner's bottom strip).",
+    "facetile.custom_colors": "On uses the colours below instead of the face's own palette; off leaves each face looking as designed.",
+    "facetile.text_color": 'Red, green, blue, 0–255. Text, numerals and hands. Only used with Use my colours.',
+    "facetile.accent_color": 'Red, green, blue, 0–255. Seconds hand and highlights. Only used with Use my colours.',
+    "facetile.background_color": "Red, green, blue, 0–255. The tile's own background. Only used with Use my colours.",
+    "facetile.background_opacity": '0–1. How see-through the whole tile is; 1 is solid.',
+    "facetile.brightness": 'Dims the face, in percent. 100 is as designed.',
+    "facetile.corner_radius_pct": "Rounded corners, as a percent of the tile's height. 0 is square.",
+    "facetile.font_family": "A font from the library for this tile's text, instead of the face's own. Empty keeps the face's font.",
+    "facetile.border_color": 'Red, green, blue, 0–255. A stroked outline around the tile.',
+    "facetile.border_width": 'Outline thickness in pixels. 0 (default) draws no outline.',
+    "facetile.border_opacity": '0–1. Only matters when border_width > 0.',
+    "facetile.analog_thickness": 'Hand weight on the analogue dials, in percent.',
+    "facetile.analog_markings": 'Tick marks on the analogue dials.',
+    "facetile.analog_numerals": 'Show 12, 3, 6 and 9 on the analogue dials.',
+    "facetile.banner_text": "The Banner face's lettering. A new line makes a new line of text.",
+    "facetile.banner_font": 'Banner lettering font: auto picks Amplify if installed, otherwise a cursive; or type any installed font family.',
+    "facetile.banner_size": 'Banner lettering size, in percent of the largest that fits.',
+    "facetile.banner_color": "Red, green, blue, 0–255. The Banner lettering's gold.",
     "nowplaying.enabled": 'Off removes the tile entirely.',
     "nowplaying.position": "Which corner it's inset from.",
     "nowplaying.offset_pct": 'Inset from that corner, percent of screen width/height — [x, y].',
@@ -520,6 +549,31 @@ LABELS = {
     "clock.border_opacity": "Outline opacity",
     "clock.align": "Alignment",
     "clock.min_width_pct": "Minimum panel width (%)",
+    "facetile.enabled": 'Enabled',
+    "facetile.face": 'Face',
+    "facetile.position": 'Corner',
+    "facetile.offset_pct": 'Inset from corner (% x, y)',
+    "facetile.size": 'Tile width (px)',
+    "facetile.format_24h": '24-hour time',
+    "facetile.show_date": 'Show the date',
+    "facetile.custom_colors": 'Use my colours',
+    "facetile.text_color": 'Text colour',
+    "facetile.accent_color": 'Accent colour',
+    "facetile.background_color": 'Background colour',
+    "facetile.background_opacity": 'Tile opacity',
+    "facetile.brightness": 'Brightness (%)',
+    "facetile.corner_radius_pct": 'Corner rounding (%)',
+    "facetile.font_family": 'Font',
+    "facetile.border_color": 'Outline colour',
+    "facetile.border_width": 'Outline width (px)',
+    "facetile.border_opacity": 'Outline opacity',
+    "facetile.analog_thickness": 'Hand thickness (%)',
+    "facetile.analog_markings": 'Tick marks',
+    "facetile.analog_numerals": 'Show numerals',
+    "facetile.banner_text": 'Banner text',
+    "facetile.banner_font": 'Banner font',
+    "facetile.banner_size": 'Banner size (%)',
+    "facetile.banner_color": 'Banner colour',
     "nowplaying.enabled": 'Enabled',
     "nowplaying.position": 'Corner',
     "nowplaying.offset_pct": 'Inset from corner (% x, y)',
@@ -716,7 +770,7 @@ def redact(data: dict) -> dict:
 #: so rather than leaving the owner to wonder why nothing happened.
 LIVE_SECTIONS = {"viewer", "slideshow", "geo", "power", "health", "network",
                  "sync", "motion", "video_proxy", "overlay", "calendar", "hindi_calendar",
-                 "clock", "status", "nowplaying", "appearance"}
+                 "clock", "status", "nowplaying", "facetile", "appearance"}
 LIVE_KEYS = {
     "display.brightness", "display.rotate", "display.background",
     "library.subfolder", "logging.level",
@@ -823,6 +877,14 @@ LIMITS: dict[str, tuple[float | None, float | None]] = {
     "clock.min_width_pct": (0.0, 100.0),
     "status.size": (6, 256),
     "nowplaying.size": (8, 256),
+    "facetile.size": (120, 1920),
+    "facetile.background_opacity": (0.0, 1.0),
+    "facetile.brightness": (20, 100),
+    "facetile.corner_radius_pct": (0.0, 50.0),
+    "facetile.border_width": (0, 60),
+    "facetile.border_opacity": (0.0, 1.0),
+    "facetile.analog_thickness": (50, 200),
+    "facetile.banner_size": (40, 100),
     "nowplaying.art_size": (32, 1024),
     "nowplaying.max_width_pct": (10.0, 80.0),
     "nowplaying.text_opacity": (0.0, 1.0),
@@ -869,6 +931,9 @@ CHOICES: dict[str, list[str]] = {
     "viewer.text_position": ["", "TL", "TC", "TR", "BL", "BC", "BR"],
     "status.position": ["TL", "TC", "TR", "BL", "BC", "BR"],
     "nowplaying.position": ["TL", "TC", "TR", "BL", "BC", "BR"],
+    "facetile.position": ["TL", "TC", "TR", "BL", "BC", "BR"],
+    "facetile.face": list(FACE_IDS),
+    "facetile.analog_markings": ["full", "hours", "minimal", "none"],
     "brand.position": ["TL", "TC", "TR", "BL", "BC", "BR"],
     "slideshow.video_engine": ["gstreamer", "vlc"],
     "calendar.grid_align_h": ["left", "center", "right"],
@@ -887,6 +952,7 @@ CHOICES: dict[str, list[str]] = {
     "clock.font_family": list(fontlib.CHOICES),
     "status.font_family": list(fontlib.CHOICES),
     "nowplaying.font_family": list(fontlib.CHOICES),
+    "facetile.font_family": list(fontlib.CHOICES),
 }
 
 #: Controls that need a list of options built at runtime.
@@ -1016,6 +1082,7 @@ def _options() -> dict[str, list[dict[str, str]]]:
         "caption-fields": pairs(CAPTION_FIELDS),
         "brand-styles": pairs(BRAND_STYLES),
         "geo-detail": pairs(DETAIL_LABELS.items()),
+        "face-tiles": pairs(FACE_LABELS.items()),
         "separator": pairs([("  ·  ", "Dot  ·"), (" – ", "Dash  –"),
                             (", ", "Comma  ,"), ("\n", "One per line")]),
         "rotate": pairs([("0", "Upright"), ("180", "Upside down")]),
@@ -1345,6 +1412,15 @@ def _state_nowplaying(c) -> str:
     return f"{n.position}, {_n(x)}%/{_n(y)}% inset · {panel}"
 
 
+def _state_facetile(c) -> str:
+    t = c.facetile
+    if not t.enabled:
+        return "Off — nothing drawn"
+    from .gfx.facelist import FACE_LABELS
+    x, y = t.offset_pct
+    return f"{FACE_LABELS.get(t.face, t.face)}, {t.position}, {_n(x)}%/{_n(y)}% inset"
+
+
 def _state_uniform_style(c) -> str:
     # Not a setting of its own -- a one-shot tool the sheet's own panel
     # drives (see app.js's drawSheetExtra), so there is nothing to report
@@ -1546,6 +1622,17 @@ JOBS = [
                 "nowplaying.background_color", "nowplaying.background_opacity",
                 "nowplaying.font_family", "nowplaying.border_color",
                 "nowplaying.border_width", "nowplaying.border_opacity"]},
+    {"name": "facetile", "kicker": "Clock face",
+     "title": "A clock face, like the one on the Acton screen",
+     "section": "facetile", "state": _state_facetile,
+     "fields": [f"facetile.{n}" for n in (
+         "enabled", "face", "position", "offset_pct", "size", "format_24h",
+         "show_date", "custom_colors", "text_color", "accent_color",
+         "background_color", "background_opacity", "brightness",
+         "corner_radius_pct", "font_family", "border_color", "border_width",
+         "border_opacity", "analog_thickness", "analog_markings",
+         "analog_numerals", "banner_text", "banner_font", "banner_size",
+         "banner_color")]},
     {"name": "uniform_style", "kicker": "Uniform style",
      "title": "Apply one look to every overlay widget",
      # Anchored on "overlay" (already claimed by the Weather overlay card)
@@ -1610,6 +1697,8 @@ def schema(config, extra_options: dict[str, Any] | None = None) -> dict[str, Any
             kind, nullable = _type_of(hints.get(f.name, f.type))
             if dotted in CHOICES:
                 kind = "select"
+            if dotted == "facetile.face":
+                kind = "faces"
             widget = DYNAMIC.get(dotted)
             if widget in ("transition", "separator", "geo-detail", "rotate",
                           "sync-directions", "locales"):

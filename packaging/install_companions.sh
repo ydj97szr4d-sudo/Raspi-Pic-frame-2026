@@ -151,12 +151,12 @@ if [ ! -x "$VENV/bin/python" ]; then
 fi
 "$VENV/bin/pip" install --progress-bar off --upgrade pip
 "$VENV/bin/pip" install --progress-bar off \
-  lgpio adafruit-circuitpython-dht paho-mqtt gpiozero pillow pyyaml
+  lgpio adafruit-circuitpython-dht paho-mqtt gpiozero pillow pyyaml numpy
 sudo usermod -aG gpio "$USER" || true
 ok "companion venv ready"
 
 # -------------------------------------------------- 4. the three scripts
-step "4/6  Writing dht_mqtt.py, panchang.py, motion_display.py, video_proxy.py"
+step "4/6  Writing dht_mqtt.py, panchang.py, faces.py, motion_display.py, video_proxy.py"
 sed -e "s|__OWM_KEY__|$OWM_KEY|" -e "s|__LAT__|$LAT|" -e "s|__LON__|$LON|" \
     -e "s|__SCREEN_W__|$SCREEN_W|" -e "s|__SCREEN_H__|$SCREEN_H|" \
     "$COMPANIONS_DIR/dht_mqtt.py" > "$HOME/dht_mqtt.py"
@@ -166,6 +166,8 @@ sed -e "s|__PIR_PIN__|$PIR_PIN|" -e "s|__CEC_DEVICE__|$CEC_DEVICE|" \
 cp "$COMPANIONS_DIR/video_proxy.py" "$HOME/video_proxy.py"
 # Hindi calendar arithmetic; dht_mqtt.py imports it from its own folder.
 cp "$COMPANIONS_DIR/panchang.py" "$HOME/panchang.py"
+# The clock-face tile's renderer (the Acton screen's faces); dht_mqtt.py imports it from its own folder.
+cp "$COMPANIONS_DIR/faces.py" "$COMPANIONS_DIR/faces_legacy.py" "$HOME/"
 chmod 755 "$HOME/dht_mqtt.py" "$HOME/motion_display.py" "$HOME/video_proxy.py"
 ok "scripts written to $HOME"
 

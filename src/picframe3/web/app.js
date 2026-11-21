@@ -1597,6 +1597,23 @@ const UNIFORM_TARGETS = {
            border_color: "status.border_color", border_width: "status.border_width",
            border_opacity: "status.border_opacity",
            align: "status.align", min_width_pct: "status.min_width_pct" },
+  nowplaying: { label: "Now playing tile",
+           text_color: "nowplaying.text_color", text_opacity: "nowplaying.text_opacity",
+           font: "nowplaying.font_family",
+           background_color: "nowplaying.background_color",
+           background_opacity: "nowplaying.background_opacity",
+           border_color: "nowplaying.border_color", border_width: "nowplaying.border_width",
+           border_opacity: "nowplaying.border_opacity" },
+  facetile: { label: "Clock face tile",
+           // A face has its own palette, so the colours only count once "Use my
+           // colours" is on; applying a text or background colour switches it on.
+           text_color: "facetile.text_color", font: "facetile.font_family",
+           background_color: "facetile.background_color",
+           background_opacity: "facetile.background_opacity",
+           border_color: "facetile.border_color", border_width: "facetile.border_width",
+           border_opacity: "facetile.border_opacity",
+           enables: { text_color: "facetile.custom_colors",
+                      background_color: "facetile.custom_colors" } },
   overlay: { label: "Weather overlay",
             font: "overlay.font_family",
             background_color: "overlay.background_color",
@@ -1774,6 +1791,7 @@ async function applyUniformStyle() {
       if (value === null) continue;             // nothing to apply for this concept
       if (!(concept in t)) continue;             // this widget has no such field
       sets.push([t[concept], value]);
+      if (t.enables && t.enables[concept]) sets.push([t.enables[concept], true]);
     }
   }
   if (!sets.length) {
@@ -2124,7 +2142,7 @@ function optionList(name) {
 function fieldControl(f) {
   const wrap = document.createElement("div");
   wrap.className = "field";
-  const wide = ["pick", "pick-string", "json", "tiers"].includes(f.kind);
+  const wide = ["pick", "pick-string", "json", "tiers", "faces"].includes(f.kind);
   if (wide) wrap.classList.add("field-wide");
 
   let control;
@@ -2179,6 +2197,9 @@ function fieldControl(f) {
     }
     case "tiers":
       control = tiersEditor(f);
+      break;
+    case "faces":
+      control = faceGrid(f);
       break;
     case "csv":
       control = `<input type="text" data-key="${escapeHtml(f.key)}" data-kind="csv" ` +
@@ -2311,7 +2332,44 @@ function markdownish(text) {
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
 }
 
+/* ---- clock-face picker ---------------------------------------------------
+   A grid of thumbnails (web/faces/<id>.png, drawn by tools/gen_face_thumbs.py
+   from the very renderer the frame uses) instead of a bare drop-down: the
+   point of a face is how it looks. It is a set of radio buttons under the
+   hood, so the keyboard and screen readers work, and picking one commits
+   through the same set_config path as every other control. */
+function faceGrid(f) {
+  const current = String(f.value ?? "");
+  const faces = (f.choices || []).map((id) => ({ id, label: faceLabel(f, id) }));
+  return `<div class="face-grid" role="radiogroup" aria-label="${escapeHtml(f.label)}" ` +
+    `data-key="${escapeHtml(f.key)}" data-kind="faces">` +
+    faces.map((o) => `<label class="face-opt${o.id === current ? " on" : ""}">` +
+      `<input type="radio" name="face-${escapeHtml(f.key)}" value="${escapeHtml(o.id)}"` +
+      `${o.id === current ? " checked" : ""}>` +
+      `<img src="faces/${encodeURIComponent(o.id)}.png" alt="" loading="lazy" ` +
+      `width="160" height="107"><span>${escapeHtml(o.label)}</span></label>`).join("") +
+    `</div>`;
+}
+
+function faceLabel(f, id) {
+  const labels = (SCHEMA?.options?.["face-tiles"] || []).find((o) => o.name === id);
+  return labels ? labels.label : id;
+}
+
+function wireFaceGrid(grid) {
+  grid.querySelectorAll('input[type="radio"]').forEach((radio) => {
+    radio.onchange = () => {
+      grid.querySelectorAll(".face-opt").forEach((l) => l.classList.remove("on"));
+      radio.closest(".face-opt").classList.add("on");
+      send("set_config", { key: grid.dataset.key, value: radio.value });
+      $("#saved").textContent =
+        `${grid.dataset.key} = "${radio.value}"  (not yet written to the config file)`;
+    };
+  });
+}
+
 function wireControl(el) {
+  if (el.dataset.kind === "faces") return wireFaceGrid(el);
   if (el.dataset.kind === "list") return;          // handled by wirePickList
   const commit = () => {
     let value;

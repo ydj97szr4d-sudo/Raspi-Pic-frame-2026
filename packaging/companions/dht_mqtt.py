@@ -18,6 +18,11 @@ try:   # sits next to this file on the Pi; only the Hindi calendar needs it
 except ImportError:
     panchang = None
 
+try:   # the clock-face tile's renderer, also beside this file; needs numpy
+    import faces
+except ImportError:
+    faces = None
+
 BROKER = "localhost"
 PORT = 1883
 TOPIC_TEMP = "home/dht11/temperature"
@@ -1472,6 +1477,113 @@ def load_nowplaying_settings():
     return settings
 
 
+DEFAULT_FACETILE_SETTINGS = {
+    "enabled": False,
+    "face": "dark",
+    "position": "BR",
+    "offset_pct": [3.0, 3.0],
+    "size": 420,
+    "format_24h": False,
+    "show_date": True,
+    "custom_colors": False,
+    "text_color": [232, 234, 237],
+    "accent_color": [255, 149, 0],
+    "background_color": [0, 0, 0],
+    "background_opacity": 1.0,
+    "brightness": 100,
+    "corner_radius_pct": 6.0,
+    "font_family": "",
+    "border_color": [255, 255, 255],
+    "border_width": 0,
+    "border_opacity": 0.9,
+    "analog_thickness": 100,
+    "analog_markings": "full",
+    "analog_numerals": True,
+    "banner_text": "Welcome Home",
+    "banner_font": "auto",
+    "banner_size": 100,
+    "banner_color": [214, 170, 72],
+}
+FACE_ASPECT = 2 / 3   # tile height / width -- the 480 x 320 the faces are designed on
+
+
+def load_facetile_settings():
+    """facetile.* from config.yaml, read fresh each call (live from the web page)."""
+    settings = dict(DEFAULT_FACETILE_SETTINGS)
+    try:
+        with open(_cfg_path, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    except OSError:
+        return settings
+    settings.update(cfg.get("facetile") or {})
+    return settings
+
+
+def facetile_image(settings, now):
+    """The finished RGBA tile for `settings` at time `now`: the face drawn at the configured
+    width, rounded corners, see-through as asked, with the optional outline. Pure (no globals
+    but the renderer), so it can be previewed without the frame."""
+    w = max(120, int(settings["size"]))
+    h = int(round(w * FACE_ASPECT))
+    opts = {
+        "clock_24h": bool(settings["format_24h"]), "show_date": bool(settings["show_date"]),
+        "brightness": int(settings["brightness"]),
+        "analog_thickness": int(settings["analog_thickness"]),
+        "analog_markings": settings["analog_markings"],
+        "analog_numerals": bool(settings["analog_numerals"]),
+        "banner_text": settings["banner_text"], "banner_font": settings["banner_font"],
+        "banner_size": int(settings["banner_size"]),
+        "banner_color": [int(v) for v in settings["banner_color"]],
+        "playing": nowplaying["state"] == "playing",
+    }
+    if settings["custom_colors"]:
+        bg = [int(v) for v in settings["background_color"]]
+        opts.update(style="flat", bg=bg, bg2=bg,
+                    fg=[int(v) for v in settings["text_color"]],
+                    accent=[int(v) for v in settings["accent_color"]])
+    if settings["font_family"]:
+        opts["font_path"] = _resolve_font(settings["font_family"])
+    tile = faces.render_face(settings["face"], w, h, now, opts).convert("RGBA")
+
+    radius = max(0, int(h * float(settings["corner_radius_pct"]) / 100))
+    ss = 4   # supersample the corner mask so its edge is smooth
+    mask = Image.new("L", (w * ss, h * ss), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, w * ss - 1, h * ss - 1], radius=radius * ss, fill=255)
+    mask = mask.resize((w, h), Image.LANCZOS)
+    opacity = max(0.0, min(1.0, float(settings["background_opacity"])))
+    tile.putalpha(mask.point(lambda a: int(a * opacity)))
+
+    bw = int(settings["border_width"])
+    if bw > 0:
+        bc = tuple(int(v) for v in settings["border_color"])
+        ba = max(0.0, min(1.0, float(settings["border_opacity"])))
+        ring = Image.new("L", (w * ss, h * ss), 0)
+        rd = ImageDraw.Draw(ring)
+        rd.rounded_rectangle([0, 0, w * ss - 1, h * ss - 1], radius=radius * ss, fill=255)
+        rd.rounded_rectangle([bw * ss, bw * ss, w * ss - 1 - bw * ss, h * ss - 1 - bw * ss],
+                             radius=max(0, radius - bw) * ss, fill=0)
+        ring = ring.resize((w, h), Image.LANCZOS).point(lambda a: int(a * ba))
+        outline = Image.new("RGBA", (w, h), (*bc, 0))
+        outline.putalpha(ring)
+        tile.alpha_composite(outline)
+    return tile
+
+
+def write_facetile(canvas):
+    """Composites the clock-face tile onto `canvas` when facetile.enabled."""
+    settings = load_facetile_settings()
+    if not settings["enabled"] or faces is None:
+        return
+    now = datetime.datetime.now()
+    try:
+        tile = facetile_image(settings, now)
+    except Exception as error:   # a bad face/colour setting must not take the whole overlay down
+        print(f"clock-face tile failed: {error}", flush=True)
+        return
+    x, y = _anchor_xy(settings["position"], settings["offset_pct"], tile.size)
+    canvas.alpha_composite(tile, (x, y))
+
+
 def _rounded_square(img, side, radius):
     """`img` cropped to a square, scaled to side x side, with rounded corners."""
     w, h = img.size
@@ -1655,6 +1767,7 @@ def write_overlay(line_text, filled_dots):
     write_clock(canvas)
     write_status(canvas)
     write_nowplaying(canvas)
+    write_facetile(canvas)
 
     if line_text:
         bg_opacity = max(0.0, min(1.0, float(overlay_settings.get("background_opacity", 0.0))))

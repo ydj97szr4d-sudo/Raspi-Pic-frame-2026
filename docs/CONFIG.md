@@ -443,6 +443,38 @@ A tile with the cover art and track of whatever Music Assistant is playing; show
 | `border_width` | integer | `0` | Outline thickness in pixels. 0 (default) draws no outline. |
 | `border_opacity` | number | `0.9` | 0–1. Only matters when border_width > 0. |
 
+## `facetile`
+
+A clock-face tile -- the same faces as the Acton screen, each adjustable on its own.
+
+| key | type | default | |
+|---|---|---|---|
+| `enabled` | boolean | `False` | Off removes the tile entirely. |
+| `face` | string | `'dark'` | Which clock face. The settings page shows them as thumbnails; the faces are the same ones the Acton screen has. |
+| `position` | string | `'BR'` | Which corner it's inset from. |
+| `offset_pct` | list of numbers | `[3.0, 3.0]` | Inset from that corner, percent of screen width/height — [x, y]. |
+| `size` | integer | `420` | Width of the tile in real screen pixels; the height follows at 3:2. |
+| `format_24h` | boolean | `False` | On shows 24-hour time on the dial text; off shows 12-hour. |
+| `show_date` | boolean | `True` | Show the date beside the dial (and in the Banner's bottom strip). |
+| `custom_colors` | boolean | `False` | On uses the colours below instead of the face's own palette; off leaves each face looking as designed. |
+| `text_color` | list of integers | `[232, 234, 237]` | Red, green, blue, 0–255. Text, numerals and hands. Only used with Use my colours. |
+| `accent_color` | list of integers | `[255, 149, 0]` | Red, green, blue, 0–255. Seconds hand and highlights. Only used with Use my colours. |
+| `background_color` | list of integers | `[0, 0, 0]` | Red, green, blue, 0–255. The tile's own background. Only used with Use my colours. |
+| `background_opacity` | number | `1.0` | 0–1. How see-through the whole tile is; 1 is solid. |
+| `brightness` | integer | `100` | Dims the face, in percent. 100 is as designed. |
+| `corner_radius_pct` | number | `6.0` | Rounded corners, as a percent of the tile's height. 0 is square. |
+| `font_family` | string | *(empty)* | A font from the library for this tile's text, instead of the face's own. Empty keeps the face's font. |
+| `border_color` | list of integers | `[255, 255, 255]` | Red, green, blue, 0–255. A stroked outline around the tile. |
+| `border_width` | integer | `0` | Outline thickness in pixels. 0 (default) draws no outline. |
+| `border_opacity` | number | `0.9` | 0–1. Only matters when border_width > 0. |
+| `analog_thickness` | integer | `100` | Hand weight on the analogue dials, in percent. |
+| `analog_markings` | string | `'full'` | Tick marks on the analogue dials. |
+| `analog_numerals` | boolean | `True` | Show 12, 3, 6 and 9 on the analogue dials. |
+| `banner_text` | string | `'Welcome Home'` | The Banner face's lettering. A new line makes a new line of text. |
+| `banner_font` | string | `'auto'` | Banner lettering font: auto picks Amplify if installed, otherwise a cursive; or type any installed font family. |
+| `banner_size` | integer | `100` | Banner lettering size, in percent of the largest that fits. |
+| `banner_color` | list of integers | `[214, 170, 72]` | Red, green, blue, 0–255. The Banner lettering's gold. |
+
 ## `brand`
 
 The small animated maker's mark in a corner of the screen.
