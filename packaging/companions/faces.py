@@ -792,7 +792,13 @@ _OPT_KEYS = ("clock_24h", "show_seconds", "style", "bg", "bg2", "fg", "accent",
              "banner_text", "banner_font", "banner_size", "banner_color")
 
 
+NO_SECONDS = {"digital", "digital-orange", "stacked", "banner"}   # these show minutes only
 ASPECT = {"banner": 2 / 3}   # tile height / width; every other face is a square dial
+
+
+def has_seconds(face_id):
+    """True when the face has something that moves every second (a seconds hand or digits)."""
+    return face_id not in NO_SECONDS
 
 
 def aspect(face_id):

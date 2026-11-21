@@ -461,6 +461,7 @@ A clock-face tile -- the same faces as the Acton screen, each adjustable on its 
 | `background_color` | list of integers | `[0, 0, 0]` | Red, green, blue, 0–255. The tile's own background. Only used with Use my colours. |
 | `background_opacity` | number | `1.0` | 0–1. How see-through the whole tile is; 1 is solid. |
 | `brightness` | integer | `100` | Dims the face, in percent. 100 is as designed. |
+| `update_seconds` | integer | `1` | How often the tile is redrawn, in seconds. 1 keeps a seconds hand moving smoothly; a larger number saves the Pi some work. Faces with no seconds hand redraw once a minute whatever this says. |
 | `corner_radius_pct` | number | `6.0` | Rounded corners, as a percent of the tile's height. 0 is square. |
 | `font_family` | string | *(empty)* | A font from the library for this tile's text, instead of the face's own. Empty keeps the face's font. |
 | `border_color` | list of integers | `[255, 255, 255]` | Red, green, blue, 0–255. A stroked outline around the tile. |

@@ -811,6 +811,10 @@ facetile:
   background_color: [0, 0, 0]
   background_opacity: 1.0 # 0–1. How see-through the whole tile is; 1 is solid.
   brightness: 100         # Dims the face, in percent. 100 is as designed.
+  # How often the tile is redrawn, in seconds. 1 keeps a seconds hand moving
+  # smoothly; a larger number saves the Pi some work. Faces with no seconds
+  # hand redraw once a minute whatever this says.
+  update_seconds: 1
   corner_radius_pct: 6.0  # Rounded corners, as a percent of the tile's height. 0 is square.
   # A font from the library for this tile's text, instead of the face's own.
   # Empty keeps the face's font.

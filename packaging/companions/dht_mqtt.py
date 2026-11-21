@@ -1490,6 +1490,7 @@ DEFAULT_FACETILE_SETTINGS = {
     "background_color": [0, 0, 0],
     "background_opacity": 1.0,
     "brightness": 100,
+    "update_seconds": 1,
     "corner_radius_pct": 6.0,
     "font_family": "",
     "border_color": [255, 255, 255],
@@ -1565,6 +1566,18 @@ def facetile_image(settings, now):
         outline.putalpha(ring)
         tile.alpha_composite(outline)
     return tile
+
+
+def facetile_period():
+    """Seconds between redraws the face tile needs right now, or None when it is off. A face with
+    nothing moving every second only needs the minute; one with a seconds hand follows
+    facetile.update_seconds."""
+    settings = load_facetile_settings()
+    if not settings["enabled"] or faces is None:
+        return None
+    if not faces.has_seconds(settings["face"]):
+        return 60
+    return max(1, min(60, int(settings["update_seconds"])))
 
 
 def write_facetile(canvas):
@@ -2127,14 +2140,25 @@ try:
         # (or its cover) changes -- without touching the sensor, which must not be
         # polled faster than its own interval.
         deadline = time.monotonic() + INTERVAL
+        face_key = None
         while time.monotonic() < deadline:
-            if np_dirty.wait(0.5):
+            redraw = False
+            if np_dirty.wait(0.2):
                 time.sleep(0.4)          # let the cover that follows the state arrive first
                 np_dirty.clear()
+                redraw = True
+            period = facetile_period()   # the clock-face tile keeps its own, faster beat
+            if period is not None:
+                key = int(time.time() // period)
+                if face_key is None:
+                    face_key = key
+                elif key != face_key:
+                    face_key, redraw = key, True
+            if redraw:
                 try:
                     write_overlay(line, filled_dots)
                 except Exception as error:
-                    print(f"now-playing redraw failed: {error}", flush=True)
+                    print(f"overlay redraw failed: {error}", flush=True)
 
 except KeyboardInterrupt:
     pass

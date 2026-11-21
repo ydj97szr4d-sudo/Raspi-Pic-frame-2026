@@ -861,6 +861,10 @@ class FaceTileConfig:
     background_opacity: float = 1.0
     #: Dims the face, percent. 100 = as designed.
     brightness: int = 100
+    #: How often the tile is redrawn, in seconds. 1 keeps a seconds hand moving smoothly;
+    #: a larger number saves the Pi some work. Faces with no seconds hand redraw once a
+    #: minute whatever this says.
+    update_seconds: int = 1
     #: Rounded corners, percent of the tile's height.
     corner_radius_pct: float = 6.0
     #: A library font name (media.fontlib.CHOICES) for this widget's text
