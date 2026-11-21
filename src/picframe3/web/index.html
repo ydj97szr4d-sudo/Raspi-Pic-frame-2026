@@ -74,6 +74,16 @@
       <button id="caption" class="btn"
               title="Write the date, place and title over the picture">Show caption</button>
       <button id="shot" class="btn" title="Capture what is actually on the frame's screen">Screenshot</button>
+      <button id="livebtn" class="btn" aria-pressed="false"
+              title="Keep a copy of the frame's screen up to date on this page">Live view</button>
+      <select id="live-rate" class="btn" aria-label="Live view refresh rate"
+              title="How often the copy is refreshed. Each refresh reads the whole screen back, so slower is gentler on the frame.">
+        <option value="2">every 2 s</option>
+        <option value="3">every 3 s</option>
+        <option value="5" selected>every 5 s</option>
+        <option value="10">every 10 s</option>
+        <option value="30">every 30 s</option>
+      </select>
       <button id="del" class="btn btn-danger" title="Move this picture out of the library">Remove</button>
     </div>
 

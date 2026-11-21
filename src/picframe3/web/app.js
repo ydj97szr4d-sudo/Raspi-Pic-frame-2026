@@ -56,20 +56,32 @@ $("#rescan").onclick = () => send("rescan");
 /* The frame has no desktop and so no screenshot tool; it reads its own
    framebuffer back instead. Useful when something looks wrong on the wall. */
 let liveUrl = null;
+let liveTimer = null;
+let liveOn = false;
+
+/* One capture: reads the frame's real screen back and puts it in the preview. */
+async function captureScreen() {
+  const res = await fetch("/api/screenshot", { cache: "no-store" });
+  if (!res.ok) throw new Error(await res.text());
+  const url = URL.createObjectURL(await res.blob());
+  const old = liveUrl;
+  liveUrl = url;
+  const img = $("#preview");
+  img.src = url;
+  img.hidden = false;
+  $("#preview-empty").hidden = true;
+  $("#live-badge").hidden = false;
+  if (old) URL.revokeObjectURL(old);
+}
+
 $("#shot").onclick = async () => {
   const button = $("#shot");
+  if (liveOn) return setLiveView(false);
   if (liveUrl) return showThumbnail();
   button.disabled = true;
   button.textContent = "Capturing…";
   try {
-    const res = await fetch("/api/screenshot", { cache: "no-store" });
-    if (!res.ok) throw new Error(await res.text());
-    liveUrl = URL.createObjectURL(await res.blob());
-    const img = $("#preview");
-    img.src = liveUrl;
-    img.hidden = false;
-    $("#preview-empty").hidden = true;
-    $("#live-badge").hidden = false;
+    await captureScreen();
     button.textContent = "Show thumbnail";
   } catch (err) {
     button.textContent = "Screenshot failed";
@@ -79,11 +91,67 @@ $("#shot").onclick = async () => {
   }
 };
 
+/* Live view: a copy of the frame's screen that keeps itself current. It only
+   asks while this page is open and visible -- a hidden tab, a closed page or
+   the switch being off costs the frame nothing -- and it waits for each capture
+   to finish before scheduling the next, so a busy frame is never queued up. */
+function liveDelay() {
+  return Math.max(2, Number($("#live-rate").value) || 5) * 1000;
+}
+
+function stopLiveTimer() {
+  if (liveTimer) clearTimeout(liveTimer);
+  liveTimer = null;
+}
+
+async function liveTick() {
+  stopLiveTimer();
+  if (!liveOn || document.hidden) return;
+  try {
+    await captureScreen();
+    $("#live-badge").textContent = "live";
+  } catch (err) {
+    $("#live-badge").textContent = "live screen · waiting";   // busy or briefly unreachable; try again
+  }
+  if (liveOn && !document.hidden) liveTimer = setTimeout(liveTick, liveDelay());
+}
+
+function setLiveView(on) {
+  liveOn = on;
+  const button = $("#livebtn");
+  button.setAttribute("aria-pressed", on ? "true" : "false");
+  button.classList.toggle("btn-primary", on);
+  button.textContent = on ? "Stop live view" : "Live view";
+  if (on) {
+    $("#shot").textContent = "Stop live view";
+    liveTick();
+  } else {
+    stopLiveTimer();
+    showThumbnail();
+  }
+}
+
+$("#livebtn").onclick = () => setLiveView(!liveOn);
+$("#live-rate").onchange = () => {
+  try { localStorage.setItem("picframe3-liverate", $("#live-rate").value); } catch (err) { /* private window */ }
+  if (liveOn) liveTick();
+};
+document.addEventListener("visibilitychange", () => {
+  if (!liveOn) return;
+  if (document.hidden) stopLiveTimer();
+  else liveTick();
+});
+try {
+  const rate = localStorage.getItem("picframe3-liverate");
+  if (rate && [...$("#live-rate").options].some((o) => o.value === rate)) $("#live-rate").value = rate;
+} catch (err) { /* private window */ }
+
 function showThumbnail() {
   if (liveUrl) URL.revokeObjectURL(liveUrl);
   liveUrl = null;
   currentId = null;              // force render() to reload the thumbnail
   $("#live-badge").hidden = true;
+  $("#live-badge").textContent = "live screen";
   $("#shot").textContent = "Screenshot";
   if (state) render(state);
 }
