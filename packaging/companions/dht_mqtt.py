@@ -1,8 +1,10 @@
 import calendar as calendar_module
 import datetime
+import io
 import json
 import math
 import os
+import threading
 import time
 import urllib.request
 import board
@@ -26,6 +28,11 @@ TOPIC_OUTDOOR = "home/outdoor/temperature"   # published by the outdoor Pico W
 TOPIC_OUTDOOR_HUM = "home/outdoor/humidity"  # published by the outdoor Pico W
 TOPIC_INDOOR_PM25 = "home/indoor_pm25"       # published by pms5003_mqtt.py
 TOPIC_INDOOR_PM10 = "home/indoor_pm10"       # published by pms5003_mqtt.py
+TOPIC_NP_STATE = "home/music/state"   # retained JSON {"state": playing|paused|idle, "title", "artist",
+                                      # "album", "player", "ts"}, published by the JBLPie display
+TOPIC_NP_COVER = "home/music/cover"   # retained JPEG bytes of the cover art; an empty payload = no cover
+NP_MAX_AGE = 90   # seconds; the publisher repeats the state about every 15 s, so a tile older than this
+                  # means the publisher (or its feed from Home Assistant) has stopped -> hide it
 TOPIC_TM_STATUS = "home/mac/timemachine_status"    # "ok"/"running"/"stale"/"error",
                                                     # published by mac_timemachine_status.py
 TOPIC_TM_AGE_H = "home/mac/timemachine_age_hours"  # hours since the last successful backup
@@ -1426,6 +1433,140 @@ def write_status(canvas):
     canvas.alpha_composite(widget, (x, y))
 
 
+DEFAULT_NOWPLAYING_SETTINGS = {
+    "enabled": True,
+    "position": "BL",
+    "offset_pct": [3.0, 3.0],
+    "size": 30,
+    "art_size": 160,
+    "show_art": True,
+    "show_paused": True,
+    "max_width_pct": 30.0,
+    "text_color": [255, 255, 255],
+    "text_opacity": 0.95,
+    "background_color": [0, 0, 0],
+    "background_opacity": 0.45,
+    "font_family": "",
+    "border_color": [255, 255, 255],
+    "border_width": 0,
+    "border_opacity": 0.9,
+}
+
+# What the publisher last told us (filled in by on_message, read by write_nowplaying).
+nowplaying = {"state": None, "title": "", "artist": "", "album": "", "player": "",
+              "time": 0.0, "cover": None}
+np_dirty = threading.Event()   # set when the track/cover changes, so the main loop redraws at once
+
+
+def load_nowplaying_settings():
+    """nowplaying.* from config.yaml, read fresh every call so a change made on
+    the web Settings page (section "Now playing") reaches this running process
+    without a restart."""
+    settings = dict(DEFAULT_NOWPLAYING_SETTINGS)
+    try:
+        with open(_cfg_path, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    except OSError:
+        return settings
+    settings.update(cfg.get("nowplaying") or {})
+    return settings
+
+
+def _rounded_square(img, side, radius):
+    """`img` cropped to a square, scaled to side x side, with rounded corners."""
+    w, h = img.size
+    m = min(w, h)
+    img = img.crop(((w - m) // 2, (h - m) // 2, (w - m) // 2 + m, (h - m) // 2 + m))
+    img = img.resize((side, side), Image.LANCZOS).convert("RGBA")
+    mask = Image.new("L", (side * 4, side * 4), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, side * 4 - 1, side * 4 - 1], radius=radius * 4, fill=255)
+    img.putalpha(mask.resize((side, side), Image.LANCZOS))
+    return img
+
+
+def write_nowplaying(canvas):
+    """Composites the "Now playing" tile onto `canvas`, on its own translucent
+    panel, if nowplaying.enabled AND the publisher says something is playing
+    (or paused, with show_paused) and was heard from within NP_MAX_AGE. Cover
+    art on the left (when one has arrived), then a small caption line, the
+    title, the artist and the album."""
+    settings = load_nowplaying_settings()
+    if not settings["enabled"]:
+        return
+    np_ = nowplaying
+    if np_["state"] not in ("playing", "paused") or time.monotonic() - np_["time"] > NP_MAX_AGE:
+        return
+    if np_["state"] == "paused" and not settings["show_paused"]:
+        return
+    if not (np_["title"] or np_["artist"]):
+        return
+
+    size = int(settings["size"])
+    text_color = tuple(int(v) for v in settings["text_color"])
+    text_opacity = max(0.0, min(1.0, float(settings["text_opacity"])))
+    bg_color = tuple(int(v) for v in settings["background_color"])
+    bg_opacity = max(0.0, min(1.0, float(settings["background_opacity"])))
+    border_color = tuple(int(v) for v in settings.get("border_color", [255, 255, 255]))
+    border_width = int(settings.get("border_width", 0))
+    border_opacity = max(0.0, min(1.0, float(settings.get("border_opacity", 0.9))))
+    font_path = _resolve_font(settings.get("font_family", ""))
+
+    def _font(px):
+        try:
+            return ImageFont.truetype(font_path, max(8, int(px)))
+        except OSError:
+            return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", max(8, int(px)))
+
+    f_head, f_title = _font(size * 0.55), _font(size)
+    f_artist, f_album = _font(size * 0.82), _font(size * 0.68)
+    alpha = max(0, min(255, round(255 * text_opacity)))
+    dim = max(0, min(255, round(alpha * 0.72)))
+    max_w = max(120, int(SCREEN_W * float(settings["max_width_pct"]) / 100))
+
+    probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    head = ("PAUSED" if np_["state"] == "paused" else "NOW PLAYING")
+    if np_["player"]:
+        head += "  ·  " + np_["player"]
+    rows = [(_fit_ellipsis(probe, head.upper() if len(head) < 40 else head, f_head, max_w), f_head, dim)]
+    if np_["title"]:
+        rows.append((_fit_ellipsis(probe, np_["title"], f_title, max_w), f_title, alpha))
+    if np_["artist"]:
+        rows.append((_fit_ellipsis(probe, np_["artist"], f_artist, max_w), f_artist, alpha))
+    if np_["album"] and np_["album"] != np_["title"]:
+        rows.append((_fit_ellipsis(probe, np_["album"], f_album, max_w), f_album, dim))
+
+    gap = max(2, round(size * 0.25))
+    heights = []
+    for text, font, _ in rows:
+        a, d = font.getmetrics()
+        heights.append(a + d)
+    text_h = sum(heights) + gap * (len(rows) - 1)
+    text_w = max(int(probe.textlength(t, font=f)) for t, f, _ in rows)
+
+    art = None
+    if settings["show_art"] and np_["cover"] is not None:
+        side = int(settings["art_size"])
+        art = _rounded_square(np_["cover"], side, max(4, round(side * 0.07)))
+    art_gap = round(size * 0.6) if art is not None else 0
+    art_w = art.width if art is not None else 0
+    content_h = max(text_h, art.height if art is not None else 0)
+    content = Image.new("RGBA", (art_w + art_gap + text_w, content_h), (0, 0, 0, 0))
+    if art is not None:
+        content.alpha_composite(art, (0, (content_h - art.height) // 2))
+    cdraw = ImageDraw.Draw(content)
+    y = (content_h - text_h) // 2
+    for (text, font, a_), h_ in zip(rows, heights):
+        cdraw.text((art_w + art_gap, y), text, font=font, fill=(*text_color, a_))
+        y += h_ + gap
+
+    pad = max(6, round(size * _PANEL_PAD_FRAC))
+    widget = _wrap_in_panel(content, pad, bg_color, bg_opacity,
+                            border_color=border_color, border_width=border_width,
+                            border_opacity=border_opacity)
+    x, y = _anchor_xy(settings["position"], settings["offset_pct"], (widget.width, widget.height))
+    canvas.alpha_composite(widget, (x, y))
+
+
 def _wrap_text(draw, text, font, max_width):
     """Exact replica of picframe3's gfx/textstyle.py _wrap()."""
     lines = []
@@ -1513,6 +1654,7 @@ def write_overlay(line_text, filled_dots):
     write_calendar(canvas)
     write_clock(canvas)
     write_status(canvas)
+    write_nowplaying(canvas)
 
     if line_text:
         bg_opacity = max(0.0, min(1.0, float(overlay_settings.get("background_opacity", 0.0))))
@@ -1706,6 +1848,8 @@ def on_connect(client, userdata, flags, reason_code, properties):
     client.subscribe(TOPIC_INDOOR_PM25)
     client.subscribe(TOPIC_INDOOR_PM10)
     client.subscribe(TOPIC_TM_STATUS)
+    client.subscribe(TOPIC_NP_STATE)
+    client.subscribe(TOPIC_NP_COVER)
     client.subscribe(TOPIC_TM_AGE_H)
     client.subscribe(TOPIC_TM_PERCENT)
     client.subscribe(TOPIC_TM_GB_DONE)
@@ -1713,6 +1857,33 @@ def on_connect(client, userdata, flags, reason_code, properties):
     client.subscribe(STATE_TOPIC)
 
 def on_message(client, userdata, msg):
+    if msg.topic == TOPIC_NP_STATE:
+        # Now-playing track from the JBLPie display (a JSON object).
+        try:
+            data = json.loads(msg.payload.decode())
+        except (ValueError, UnicodeDecodeError):
+            return
+        state = data.get("state")
+        nowplaying.update(
+            state=state if state in ("playing", "paused", "idle") else None,
+            title=str(data.get("title") or ""), artist=str(data.get("artist") or ""),
+            album=str(data.get("album") or ""), player=str(data.get("player") or ""),
+            time=time.monotonic())
+        if state not in ("playing", "paused"):
+            nowplaying["cover"] = None
+        np_dirty.set()
+        return
+    if msg.topic == TOPIC_NP_COVER:
+        # JPEG bytes (retained); empty = no cover. A bad image just means no art.
+        cover = None
+        if msg.payload:
+            try:
+                cover = Image.open(io.BytesIO(msg.payload)).convert("RGB")
+            except Exception:
+                cover = None
+        nowplaying["cover"] = cover
+        np_dirty.set()
+        return
     if msg.topic == STATE_TOPIC:
         # PicFrame3's own retained state payload -- a JSON object, not a
         # bare number, so this has to be handled before the float parse
@@ -1841,7 +2012,18 @@ try:
             time.sleep(2.0)
             continue
 
-        time.sleep(INTERVAL)
+        # Sleep until the next sensor read, but redraw at once when the playing track
+        # (or its cover) changes -- without touching the sensor, which must not be
+        # polled faster than its own interval.
+        deadline = time.monotonic() + INTERVAL
+        while time.monotonic() < deadline:
+            if np_dirty.wait(0.5):
+                time.sleep(0.4)          # let the cover that follows the state arrive first
+                np_dirty.clear()
+                try:
+                    write_overlay(line, filled_dots)
+                except Exception as error:
+                    print(f"now-playing redraw failed: {error}", flush=True)
 
 except KeyboardInterrupt:
     pass

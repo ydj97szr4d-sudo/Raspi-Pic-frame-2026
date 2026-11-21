@@ -826,6 +826,54 @@ class StatusConfig:
 
 
 @dataclass
+class NowPlayingConfig:
+    """The "Now playing" tile drawn by ``dht_mqtt.py`` onto the same overlay
+    image: cover art, title, artist and album of whatever Music Assistant is
+    playing, with its own translucent panel. The track arrives over MQTT
+    (``home/music/state`` and ``home/music/cover``, published by the JBLPie
+    display or anything else that writes those topics); the tile is drawn
+    only while something is playing and disappears when playback stops.
+    """
+
+    #: Off removes the tile entirely; nothing is drawn or measured.
+    enabled: bool = True
+    #: Which corner it's inset from: TL TC TR BL BC BR.
+    position: str = "BL"
+    #: Inset from that corner, percent of screen width/height -- [x, y].
+    offset_pct: list[float] = field(default_factory=lambda: [3.0, 3.0])
+    #: Size of the title text, in real screen pixels (artist and album are
+    #: drawn smaller, in proportion).
+    size: int = 30
+    #: Side of the square cover art, in real screen pixels.
+    art_size: int = 160
+    #: Draw the cover art next to the text. Off: text only.
+    show_art: bool = True
+    #: Keep the tile up while playback is paused (it then says "Paused").
+    #: Off hides it as soon as the music pauses.
+    show_paused: bool = True
+    #: Widest the text block may grow, percent of the screen's width; longer
+    #: titles are cut with an ellipsis.
+    max_width_pct: float = 30.0
+    #: Red, green, blue, 0-255.
+    text_color: list[int] = field(default_factory=lambda: [255, 255, 255])
+    #: 0 (invisible) - 1 (fully opaque).
+    text_opacity: float = 0.95
+    #: Red, green, blue, 0-255. The panel drawn behind the tile.
+    background_color: list[int] = field(default_factory=lambda: [0, 0, 0])
+    #: 0 (no panel at all) - 1 (solid panel).
+    background_opacity: float = 0.45
+    #: A library font name (media.fontlib.CHOICES) for this widget alone,
+    #: instead of the frame-wide viewer.font. "" (default) inherits it.
+    font_family: str = ""
+    #: Red, green, blue, 0-255. A stroked outline around the panel.
+    border_color: list[int] = field(default_factory=lambda: [255, 255, 255])
+    #: Outline thickness in pixels. 0 (default) draws no outline.
+    border_width: int = 0
+    #: 0 (invisible) - 1 (fully opaque). Only matters when border_width > 0.
+    border_opacity: float = 0.9
+
+
+@dataclass
 class BrandConfig:
     """The small animated mark in a corner of the screen -- the frame's own
     maker's mark, not a photo caption or status readout. Drawn transparent
@@ -881,6 +929,7 @@ class Config:
     hindi_calendar: HindiCalendarConfig = field(default_factory=HindiCalendarConfig)
     clock: ClockConfig = field(default_factory=ClockConfig)
     status: StatusConfig = field(default_factory=StatusConfig)
+    nowplaying: NowPlayingConfig = field(default_factory=NowPlayingConfig)
     brand: BrandConfig = field(default_factory=BrandConfig)
 
     #: Where this config was loaded from, for ``save()``.

@@ -752,6 +752,38 @@ status:
   # the strip is narrower. 0 leaves it hugging the content.
   min_width_pct: 0.0
 
+# A tile with the cover art and track of whatever Music Assistant is
+# playing; shown only while music plays.
+nowplaying:
+  enabled: true           # Off removes the tile entirely.
+  position: BL            # Which corner it's inset from.
+  offset_pct: [3.0, 3.0]  # Inset from that corner, percent of screen width/height — [x, y].
+  # Size of the title text, in real screen pixels; artist and album are
+  # drawn smaller.
+  size: 30
+  art_size: 160           # Side of the square cover art, in real screen pixels.
+  show_art: true          # On draws the cover art beside the text; off shows the text alone.
+  # On keeps the tile up while the music is paused (it then says Paused);
+  # off hides it as soon as playback pauses.
+  show_paused: true
+  # Widest the text block may grow, percent of the screen's width. Longer
+  # titles are cut with an ellipsis.
+  max_width_pct: 30.0
+  # Red, green, blue, 0–255.
+  text_color: [255, 255, 255]
+  text_opacity: 0.95      # 0–1.
+  # Red, green, blue, 0–255. The panel drawn behind the tile.
+  background_color: [0, 0, 0]
+  # 0 (no panel at all) – 1 (solid panel).
+  background_opacity: 0.45
+  # A font from the library for this widget alone, instead of the frame-wide
+  # font. Empty inherits it.
+  font_family: ''
+  # Red, green, blue, 0–255. A stroked outline around the panel.
+  border_color: [255, 255, 255]
+  border_width: 0         # Outline thickness in pixels. 0 (default) draws no outline.
+  border_opacity: 0.9     # 0–1. Only matters when border_width > 0.
+
 # The small animated maker's mark in a corner of the screen.
 brand:
   enabled: true           # Off removes the mark entirely. (restart)

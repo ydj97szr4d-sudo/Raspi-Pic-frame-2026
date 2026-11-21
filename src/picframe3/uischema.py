@@ -54,6 +54,8 @@ SECTION_PROSE = {
                       "calendar when the Calendar style is Hindi.",
     "clock": "A custom-drawn clock with its own translucent panel.",
     "status": "A small status strip -- outdoor sensor link, and more to come.",
+    "nowplaying": "A tile with the cover art and track of whatever Music "
+                  "Assistant is playing; shown only while music plays.",
     "brand": "The small animated maker's mark in a corner of the screen.",
     "appearance": "How this web page itself looks -- font and accent colour.",
 }
@@ -79,6 +81,7 @@ SECTION_LABELS = {
     "hindi_calendar": "Hindi calendar",
     "clock": "Clock widget",
     "status": "Status strip",
+    "nowplaying": "Now playing tile",
     "brand": "Brand mark",
     "appearance": "Appearance",
 }
@@ -331,6 +334,22 @@ NOTES = {
     "clock.border_opacity": "0–1. Only matters when border_width > 0.",
     "clock.align": "Left, centre or right justification of the time text within its own panel. Only visible once min_width_pct stretches the panel beyond the text's own width.",
     "clock.min_width_pct": "Stretches the panel to at least this percent of the screen's width when the time text is narrower. 0 leaves it hugging the text.",
+    "nowplaying.enabled": 'Off removes the tile entirely.',
+    "nowplaying.position": "Which corner it's inset from.",
+    "nowplaying.offset_pct": 'Inset from that corner, percent of screen width/height — [x, y].',
+    "nowplaying.size": 'Size of the title text, in real screen pixels; artist and album are drawn smaller.',
+    "nowplaying.art_size": 'Side of the square cover art, in real screen pixels.',
+    "nowplaying.show_art": 'On draws the cover art beside the text; off shows the text alone.',
+    "nowplaying.show_paused": 'On keeps the tile up while the music is paused (it then says Paused); off hides it as soon as playback pauses.',
+    "nowplaying.max_width_pct": "Widest the text block may grow, percent of the screen's width. Longer titles are cut with an ellipsis.",
+    "nowplaying.text_color": 'Red, green, blue, 0–255.',
+    "nowplaying.text_opacity": '0–1.',
+    "nowplaying.background_color": 'Red, green, blue, 0–255. The panel drawn behind the tile.',
+    "nowplaying.background_opacity": '0 (no panel at all) – 1 (solid panel).',
+    "nowplaying.font_family": 'A font from the library for this widget alone, instead of the frame-wide font. Empty inherits it.',
+    "nowplaying.border_color": 'Red, green, blue, 0–255. A stroked outline around the panel.',
+    "nowplaying.border_width": 'Outline thickness in pixels. 0 (default) draws no outline.',
+    "nowplaying.border_opacity": '0–1. Only matters when border_width > 0.',
     "status.enabled": "Off removes the strip entirely.",
     "status.position": "Which corner it's inset from.",
     "status.offset_pct": "Inset from that corner, percent of screen width/height — [x, y].",
@@ -501,6 +520,22 @@ LABELS = {
     "clock.border_opacity": "Outline opacity",
     "clock.align": "Alignment",
     "clock.min_width_pct": "Minimum panel width (%)",
+    "nowplaying.enabled": 'Enabled',
+    "nowplaying.position": 'Corner',
+    "nowplaying.offset_pct": 'Inset from corner (% x, y)',
+    "nowplaying.size": 'Title text size (px)',
+    "nowplaying.art_size": 'Cover art size (px)',
+    "nowplaying.show_art": 'Show cover art',
+    "nowplaying.show_paused": 'Keep while paused',
+    "nowplaying.max_width_pct": 'Maximum text width (%)',
+    "nowplaying.text_color": 'Font colour',
+    "nowplaying.text_opacity": 'Font opacity',
+    "nowplaying.background_color": 'Background colour',
+    "nowplaying.background_opacity": 'Background opacity',
+    "nowplaying.font_family": 'Font',
+    "nowplaying.border_color": 'Outline colour',
+    "nowplaying.border_width": 'Outline width (px)',
+    "nowplaying.border_opacity": 'Outline opacity',
     "status.position": "Corner",
     "status.offset_pct": "Inset from corner (% x, y)",
     "status.size": "Status text size (px)",
@@ -681,7 +716,7 @@ def redact(data: dict) -> dict:
 #: so rather than leaving the owner to wonder why nothing happened.
 LIVE_SECTIONS = {"viewer", "slideshow", "geo", "power", "health", "network",
                  "sync", "motion", "video_proxy", "overlay", "calendar", "hindi_calendar",
-                 "clock", "status", "appearance"}
+                 "clock", "status", "nowplaying", "appearance"}
 LIVE_KEYS = {
     "display.brightness", "display.rotate", "display.background",
     "library.subfolder", "logging.level",
@@ -787,6 +822,13 @@ LIMITS: dict[str, tuple[float | None, float | None]] = {
     "clock.border_opacity": (0.0, 1.0),
     "clock.min_width_pct": (0.0, 100.0),
     "status.size": (6, 256),
+    "nowplaying.size": (8, 256),
+    "nowplaying.art_size": (32, 1024),
+    "nowplaying.max_width_pct": (10.0, 80.0),
+    "nowplaying.text_opacity": (0.0, 1.0),
+    "nowplaying.background_opacity": (0.0, 1.0),
+    "nowplaying.border_width": (0, 60),
+    "nowplaying.border_opacity": (0.0, 1.0),
     "status.text_opacity": (0.0, 1.0),
     "status.background_opacity": (0.0, 1.0),
     "status.border_width": (0, 60),
@@ -826,6 +868,7 @@ CHOICES: dict[str, list[str]] = {
     "clock.position": ["TL", "TC", "TR", "BL", "BC", "BR"],
     "viewer.text_position": ["", "TL", "TC", "TR", "BL", "BC", "BR"],
     "status.position": ["TL", "TC", "TR", "BL", "BC", "BR"],
+    "nowplaying.position": ["TL", "TC", "TR", "BL", "BC", "BR"],
     "brand.position": ["TL", "TC", "TR", "BL", "BC", "BR"],
     "slideshow.video_engine": ["gstreamer", "vlc"],
     "calendar.grid_align_h": ["left", "center", "right"],
@@ -843,6 +886,7 @@ CHOICES: dict[str, list[str]] = {
     "calendar.font_family": list(fontlib.CHOICES),
     "clock.font_family": list(fontlib.CHOICES),
     "status.font_family": list(fontlib.CHOICES),
+    "nowplaying.font_family": list(fontlib.CHOICES),
 }
 
 #: Controls that need a list of options built at runtime.
@@ -1291,6 +1335,16 @@ def _state_status(c) -> str:
     return f"{st.position}, {_n(x)}%/{_n(y)}% inset · {panel}"
 
 
+def _state_nowplaying(c) -> str:
+    n = c.nowplaying
+    if not n.enabled:
+        return "Off — nothing drawn"
+    x, y = n.offset_pct
+    panel = (f"panel {_ratio(n.background_opacity)}" if n.background_opacity > 0
+             else "no panel")
+    return f"{n.position}, {_n(x)}%/{_n(y)}% inset · {panel}"
+
+
 def _state_uniform_style(c) -> str:
     # Not a setting of its own -- a one-shot tool the sheet's own panel
     # drives (see app.js's drawSheetExtra), so there is nothing to report
@@ -1482,6 +1536,16 @@ JOBS = [
                 "status.background_color", "status.background_opacity",
                 "status.font_family", "status.border_color", "status.border_width",
                 "status.border_opacity", "status.align", "status.min_width_pct"]},
+    {"name": "nowplaying", "kicker": "Now playing",
+     "title": "Cover art and track while Music Assistant plays",
+     "section": "nowplaying", "state": _state_nowplaying,
+     "fields": ["nowplaying.enabled", "nowplaying.position", "nowplaying.offset_pct",
+                "nowplaying.size", "nowplaying.art_size", "nowplaying.show_art",
+                "nowplaying.show_paused", "nowplaying.max_width_pct",
+                "nowplaying.text_color", "nowplaying.text_opacity",
+                "nowplaying.background_color", "nowplaying.background_opacity",
+                "nowplaying.font_family", "nowplaying.border_color",
+                "nowplaying.border_width", "nowplaying.border_opacity"]},
     {"name": "uniform_style", "kicker": "Uniform style",
      "title": "Apply one look to every overlay widget",
      # Anchored on "overlay" (already claimed by the Weather overlay card)

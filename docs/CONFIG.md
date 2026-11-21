@@ -420,6 +420,29 @@ A small status strip -- outdoor sensor link, and more to come.
 | `align` | string | `'L'` | Left, centre or right justification of the strip's rows within its own panel. Only visible once min_width_pct stretches the panel beyond the rows' own width. |
 | `min_width_pct` | number | `0.0` | Stretches the panel to at least this percent of the screen's width when the strip is narrower. 0 leaves it hugging the content. |
 
+## `nowplaying`
+
+A tile with the cover art and track of whatever Music Assistant is playing; shown only while music plays.
+
+| key | type | default | |
+|---|---|---|---|
+| `enabled` | boolean | `True` | Off removes the tile entirely. |
+| `position` | string | `'BL'` | Which corner it's inset from. |
+| `offset_pct` | list of numbers | `[3.0, 3.0]` | Inset from that corner, percent of screen width/height — [x, y]. |
+| `size` | integer | `30` | Size of the title text, in real screen pixels; artist and album are drawn smaller. |
+| `art_size` | integer | `160` | Side of the square cover art, in real screen pixels. |
+| `show_art` | boolean | `True` | On draws the cover art beside the text; off shows the text alone. |
+| `show_paused` | boolean | `True` | On keeps the tile up while the music is paused (it then says Paused); off hides it as soon as playback pauses. |
+| `max_width_pct` | number | `30.0` | Widest the text block may grow, percent of the screen's width. Longer titles are cut with an ellipsis. |
+| `text_color` | list of integers | `[255, 255, 255]` | Red, green, blue, 0–255. |
+| `text_opacity` | number | `0.95` | 0–1. |
+| `background_color` | list of integers | `[0, 0, 0]` | Red, green, blue, 0–255. The panel drawn behind the tile. |
+| `background_opacity` | number | `0.45` | 0 (no panel at all) – 1 (solid panel). |
+| `font_family` | string | *(empty)* | A font from the library for this widget alone, instead of the frame-wide font. Empty inherits it. |
+| `border_color` | list of integers | `[255, 255, 255]` | Red, green, blue, 0–255. A stroked outline around the panel. |
+| `border_width` | integer | `0` | Outline thickness in pixels. 0 (default) draws no outline. |
+| `border_opacity` | number | `0.9` | 0–1. Only matters when border_width > 0. |
+
 ## `brand`
 
 The small animated maker's mark in a corner of the screen.
